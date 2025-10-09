@@ -25,6 +25,14 @@ jobs:
           `pkg-config --cflags --libs gtk+-3.0` \
           -lm -lsqlite3 -Wall -O2
 
+    - name: Set executable permissions
+      run: chmod +x polar_doctor
+
+    - name: Test binary
+      run: |
+        ./polar_doctor --version || echo "Note: No version flag available"
+        file polar_doctor
+
     - name: Create package
       run: |
         mkdir -p dist
@@ -126,6 +134,17 @@ jobs:
     - name: Checkout code
       uses: actions/checkout@v4
 
+    - name: Cache Homebrew
+      uses: actions/cache@v4
+      with:
+        path: |
+          ~/Library/Caches/Homebrew
+          /usr/local/Cellar/gtk+3
+          /usr/local/Cellar/sqlite
+        key: ${{ runner.os }}-brew-${{ hashFiles('.github/workflows/*.yml') }}
+        restore-keys: |
+          ${{ runner.os }}-brew-
+
     - name: Install dependencies
       run: |
         brew install gtk+3 sqlite3 pkg-config
@@ -135,6 +154,14 @@ jobs:
         gcc -o polar_doctor polar_doctor.c \
           `pkg-config --cflags --libs gtk+-3.0` \
           -lsqlite3 -Wall -O2
+
+    - name: Set executable permissions
+      run: chmod +x polar_doctor
+
+    - name: Test binary
+      run: |
+        ./polar_doctor --version || echo "Note: No version flag available"
+        file polar_doctor
 
     - name: Create app bundle
       run: |
@@ -211,13 +238,26 @@ jobs:
         name: polar_doctor-macos-x64
         path: ./artifacts
 
+    - name: Generate checksums
+      run: |
+        cd artifacts
+        sha256sum polar_doctor-linux-x64.tar.gz > polar_doctor-linux-x64.tar.gz.sha256
+        sha256sum polar_doctor-windows-x64.zip > polar_doctor-windows-x64.zip.sha256
+        sha256sum polar_doctor-macos-x64.tar.gz > polar_doctor-macos-x64.tar.gz.sha256
+        sha256sum * | grep -v ".sha256" > SHA256SUMS.txt
+        cat SHA256SUMS.txt
+
     - name: Create Release
       uses: softprops/action-gh-release@v2
       with:
         files: |
           artifacts/polar_doctor-linux-x64.tar.gz
+          artifacts/polar_doctor-linux-x64.tar.gz.sha256
           artifacts/polar_doctor-windows-x64.zip
+          artifacts/polar_doctor-windows-x64.zip.sha256
           artifacts/polar_doctor-macos-x64.tar.gz
+          artifacts/polar_doctor-macos-x64.tar.gz.sha256
+          artifacts/SHA256SUMS.txt
         body: |
           # 🎉 Polar Doctor ${{ github.ref_name }}
 
@@ -246,6 +286,17 @@ jobs:
           - ✅ Interface multilingue (FR/EN)
           - ✅ Calcul VMG automatique
           - ✅ Impression et export PDF
+
+          ## 🔐 Vérification des fichiers
+
+          Pour vérifier l'intégrité des téléchargements :
+          ```bash
+          sha256sum -c polar_doctor-linux-x64.tar.gz.sha256
+          sha256sum -c polar_doctor-windows-x64.zip.sha256
+          sha256sum -c polar_doctor-macos-x64.tar.gz.sha256
+          ```
+
+          Ou consultez le fichier `SHA256SUMS.txt` pour tous les checksums.
 
           ## 📚 Documentation
 
