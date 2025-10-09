@@ -4,11 +4,6 @@
  * Compilation: gcc -o polar_doctor polar_doctor.c -lm -lsqlite3 `pkg-config --cflags --libs gtk+-3.0`
  */
 
-// Fix pour Windows - désactive les portails de fichiers qui peuvent causer des crashes
-#ifdef _WIN32
-#define G_APPLICATION_FLAGS_NONE 0
-#endif
-
 #include <gtk/gtk.h>
 #include <cairo.h>
 #include <math.h>
