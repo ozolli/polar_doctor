@@ -2696,14 +2696,6 @@ void on_update_clicked(GtkWidget *widget, gpointer user_data) {
             // Charger directement en mémoire
             load_polar_from_grid(app->polar_data, &grid, polar);
 
-            // Libérer la grille et la liste de fichiers maintenant qu'on a extrait les données
-            free_polar_grid(&grid);
-#ifdef _WIN32
-            g_slist_free_full(filenames, free);
-#else
-            g_slist_free_full(filenames, g_free);
-#endif
-
             // Restaurer le nom de fichier et marquer comme modifié
             strncpy(app->polar_data->filename, saved_filename, sizeof(app->polar_data->filename) - 1);
             app->polar_data->modified = TRUE;
@@ -2734,14 +2726,6 @@ void on_update_clicked(GtkWidget *widget, gpointer user_data) {
         } else {
             gtk_widget_destroy(progress_dialog);
 
-            // Libérer la mémoire en cas d'erreur
-            free_polar_grid(&grid);
-#ifdef _WIN32
-            g_slist_free_full(filenames, free);
-#else
-            g_slist_free_full(filenames, g_free);
-#endif
-
             GtkWidget *error_dialog = gtk_message_dialog_new(GTK_WINDOW(app->window),
                                                               GTK_DIALOG_MODAL,
                                                               GTK_MESSAGE_ERROR,
@@ -2750,6 +2734,14 @@ void on_update_clicked(GtkWidget *widget, gpointer user_data) {
             gtk_dialog_run(GTK_DIALOG(error_dialog));
             gtk_widget_destroy(error_dialog);
         }
+
+        // Libérer la mémoire (grille et liste de fichiers)
+        free_polar_grid(&grid);
+#ifdef _WIN32
+        g_slist_free_full(filenames, free);
+#else
+        g_slist_free_full(filenames, g_free);
+#endif
     }
 }
 
