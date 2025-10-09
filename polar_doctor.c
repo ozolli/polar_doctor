@@ -786,6 +786,55 @@ void load_polar_from_memory(PolarData *data, polar_grid_t *grid) {
     }
 }
 
+// Interpolation bilinéaire pour obtenir une valeur BSP depuis la grille
+double interpolate_bsp(double polar[PG_MAX_ANGLES][PG_MAX_SPEEDS], double twa, double tws) {
+    // Trouver les buckets encadrants pour TWA
+    int twa_low = ((int)(twa / PG_ANGLE_STEP)) * PG_ANGLE_STEP;
+    int twa_high = twa_low + PG_ANGLE_STEP;
+
+    // Trouver les buckets encadrants pour TWS
+    int tws_low = ((int)(tws / PG_SPEED_STEP)) * PG_SPEED_STEP;
+    int tws_high = tws_low + PG_SPEED_STEP;
+
+    // Vérifier les limites
+    if (twa_low < 0) twa_low = 0;
+    if (twa_high >= PG_MAX_ANGLES) twa_high = PG_MAX_ANGLES - 1;
+    if (tws_low < 0) tws_low = 0;
+    if (tws_high >= PG_MAX_SPEEDS) tws_high = PG_MAX_SPEEDS - 1;
+
+    // Récupérer les 4 valeurs des coins
+    double v00 = polar[twa_low][tws_low];   // Coin bas-gauche
+    double v10 = polar[twa_high][tws_low];  // Coin haut-gauche
+    double v01 = polar[twa_low][tws_high];  // Coin bas-droite
+    double v11 = polar[twa_high][tws_high]; // Coin haut-droite
+
+    // Si on est exactement sur un bucket, retourner directement
+    if (twa_low == twa_high && tws_low == tws_high) {
+        return v00;
+    }
+
+    // Calculer les coefficients d'interpolation (entre 0 et 1)
+    double t_twa = 0.0, t_tws = 0.0;
+
+    if (twa_high > twa_low) {
+        t_twa = (twa - twa_low) / (double)(twa_high - twa_low);
+    }
+
+    if (tws_high > tws_low) {
+        t_tws = (tws - tws_low) / (double)(tws_high - tws_low);
+    }
+
+    // Interpolation bilinéaire
+    // D'abord interpoler selon TWS (horizontal)
+    double v0 = v00 * (1.0 - t_tws) + v01 * t_tws;  // Interpolation à TWA_low
+    double v1 = v10 * (1.0 - t_tws) + v11 * t_tws;  // Interpolation à TWA_high
+
+    // Puis interpoler selon TWA (vertical)
+    double result = v0 * (1.0 - t_twa) + v1 * t_twa;
+
+    return result;
+}
+
 // Mettre à jour une polaire existante depuis la grille (conserve la structure TWS/TWA)
 void update_polar_from_grid(PolarData *data, double polar[PG_MAX_ANGLES][PG_MAX_SPEEDS]) {
     // Parcourir les angles et vitesses existants dans la polaire
@@ -797,18 +846,17 @@ void update_polar_from_grid(PolarData *data, double polar[PG_MAX_ANGLES][PG_MAX_
         for (int speed_idx = 0; speed_idx < data->num_speeds; speed_idx++) {
             int tws = data->tws_values[speed_idx];
 
-            // Arrondir aux buckets de la grille
-            int angle_bucket = round_to_bucket(twa, PG_ANGLE_STEP);
-            int speed_bucket = round_to_bucket(tws, PG_SPEED_STEP);
+            // Utiliser l'interpolation bilinéaire pour obtenir la valeur BSP
+            double new_bsp = interpolate_bsp(polar, (double)twa, (double)tws);
 
-            // Vérifier les limites
-            if (angle_bucket >= 0 && angle_bucket < PG_MAX_ANGLES &&
-                speed_bucket >= 0 && speed_bucket < PG_MAX_SPEEDS) {
+            if (new_bsp > 0.0) {
+                double old_bsp = data->polar_data[angle_idx][speed_idx];
 
-                double bsp = polar[angle_bucket][speed_bucket];
-                if (bsp > 0.0) {
-                    data->polar_data[angle_idx][speed_idx] = bsp;
-                    snprintf(data->polar_data_str[angle_idx][speed_idx], 16, "%.2f", bsp);
+                // Ne mettre à jour que si la nouvelle valeur est >= 95% de l'ancienne
+                // (ou si l'ancienne valeur est 0)
+                if (old_bsp == 0.0 || new_bsp >= old_bsp * 0.95) {
+                    data->polar_data[angle_idx][speed_idx] = new_bsp;
+                    snprintf(data->polar_data_str[angle_idx][speed_idx], 16, "%.2f", new_bsp);
                 }
             }
         }
