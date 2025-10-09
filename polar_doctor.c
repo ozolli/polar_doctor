@@ -2692,12 +2692,14 @@ void on_update_clicked(GtkWidget *widget, gpointer user_data) {
             // Sauvegarder le nom de fichier actuel
             char saved_filename[256];
             strncpy(saved_filename, app->polar_data->filename, sizeof(saved_filename) - 1);
+            saved_filename[sizeof(saved_filename) - 1] = '\0';
 
             // Charger directement en mémoire
             load_polar_from_grid(app->polar_data, &grid, polar);
 
             // Restaurer le nom de fichier et marquer comme modifié
             strncpy(app->polar_data->filename, saved_filename, sizeof(app->polar_data->filename) - 1);
+            app->polar_data->filename[sizeof(app->polar_data->filename) - 1] = '\0';
             app->polar_data->modified = TRUE;
 
             // Reconstruire l'interface
