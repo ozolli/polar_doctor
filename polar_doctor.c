@@ -2559,8 +2559,6 @@ void on_create_clicked(GtkWidget *widget, gpointer user_data) {
 
         free_polar_grid(&grid);
         g_slist_free_full(filenames, g_free);
-    } else {
-        gtk_widget_destroy(dialog);
     }
 }
 
@@ -2733,8 +2731,6 @@ void on_update_clicked(GtkWidget *widget, gpointer user_data) {
 
         free_polar_grid(&grid);
         g_slist_free_full(filenames, g_free);
-    } else {
-        gtk_widget_destroy(dialog);
     }
 }
 
