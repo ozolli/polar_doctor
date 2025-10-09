@@ -1,8 +1,13 @@
 /*
- * polar_editor_gui.c
+ * polar_doctor.c
  * Interface graphique GTK pour l'édition de diagrammes polaires
- * Compilation: gcc -o polar_editor_gui polar_editor_gui.c -lm -lsqlite3 `pkg-config --cflags --libs gtk+-3.0`
+ * Compilation: gcc -o polar_doctor polar_doctor.c -lm -lsqlite3 `pkg-config --cflags --libs gtk+-3.0`
  */
+
+// Fix pour Windows - désactive les portails de fichiers qui peuvent causer des crashes
+#ifdef _WIN32
+#define G_APPLICATION_FLAGS_NONE 0
+#endif
 
 #include <gtk/gtk.h>
 #include <cairo.h>
@@ -14,6 +19,12 @@
 #include <ctype.h>
 #include <stdbool.h>
 #include <sqlite3.h>
+
+// Configuration spécifique Windows pour les dialogues de fichiers
+#ifdef _WIN32
+#include <windows.h>
+#define GTK_FILE_CHOOSER_NATIVE_DISABLED 1
+#endif
 
 #define MAX_ANGLES 37    // 0° à 180° par pas de 5°
 #define MAX_SPEEDS 16    // 4 à 60 kn par pas de variable
@@ -3203,6 +3214,14 @@ void on_help_clicked(GtkWidget *widget, gpointer user_data) {
 }
 
 int main(int argc, char *argv[]) {
+    // Fix pour Windows - désactive les portails GTK qui peuvent causer des crashes
+    #ifdef _WIN32
+    g_setenv("GTK_USE_PORTAL", "0", TRUE);
+    g_setenv("GDK_BACKEND", "win32", TRUE);
+    // Désactive le backend natif de fichiers qui peut causer des problèmes
+    g_setenv("GTK_FILE_CHOOSER_BACKEND", "gtk", TRUE);
+    #endif
+
     gtk_init(&argc, &argv);
 
     // Forcer la locale C APRÈS gtk_init pour que atof() utilise le point comme séparateur décimal
