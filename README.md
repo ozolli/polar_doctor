@@ -1,8 +1,8 @@
 # Polar Doctor ⛵
 
-[![Build Status](https://github.com/yourusername/polar_doctor/workflows/Build%20Polar%20Doctor/badge.svg)](https://github.com/yourusername/polar_doctor/actions)
+[![Build Status](https://github.com/ozolli/polar_doctor/workflows/Build%20Polar%20Doctor/badge.svg)](https://github.com/ozolli/polar_doctor/actions)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
-[![Platform](https://img.shields.io/badge/platform-Linux%20%7C%20Windows%20%7C%20macOS-blue)](https://github.com/yourusername/polar_doctor)
+[![Platform](https://img.shields.io/badge/platform-Linux%20%7C%20Windows%20%7C%20macOS-blue)](https://github.com/ozolli/polar_doctor)
 
 **Polar Doctor** est un éditeur et générateur de diagrammes polaires pour voiliers. Il permet de créer, éditer, analyser et imprimer des polaires de performance à partir de données NMEA et VDR.
 
@@ -50,7 +50,7 @@
 
 ```bash
 # Cloner le dépôt
-git clone https://github.com/yourusername/polar_doctor.git
+git clone https://github.com/ozolli/polar_doctor.git
 cd polar_doctor
 
 # Compiler et installer
