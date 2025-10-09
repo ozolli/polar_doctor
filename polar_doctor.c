@@ -929,6 +929,7 @@ gboolean load_polar_file(const char *filename, PolarData *data) {
 
     fclose(f);
     strncpy(data->filename, filename, sizeof(data->filename) - 1);
+    data->filename[sizeof(data->filename) - 1] = '\0';
     data->modified = FALSE;
     return TRUE;
 }
@@ -974,6 +975,7 @@ gboolean save_polar_file(const char *filename, PolarData *data) {
 
     fclose(f);
     strncpy(data->filename, final_filename, sizeof(data->filename) - 1);
+    data->filename[sizeof(data->filename) - 1] = '\0';
     data->modified = FALSE;
     return TRUE;
 }
