@@ -147,6 +147,195 @@ void on_delete_clicked(GtkWidget *widget, gpointer user_data);
 gboolean on_header_clicked(GtkWidget *widget, GdkEventButton *event, gpointer user_data);
 void on_help_clicked(GtkWidget *widget, gpointer user_data);
 void on_lang_clicked(GtkWidget *widget, gpointer user_data);
+
+// ============================================================================
+// Dialogues de fichiers natifs Windows (évite les crashes GTK)
+// ============================================================================
+
+#ifdef _WIN32
+
+// Convertit UTF-8 vers wide char pour Windows
+static wchar_t* utf8_to_wchar(const char *utf8) {
+    if (!utf8) return NULL;
+    int len = MultiByteToWideChar(CP_UTF8, 0, utf8, -1, NULL, 0);
+    if (len == 0) return NULL;
+    wchar_t *wstr = (wchar_t*)malloc(len * sizeof(wchar_t));
+    MultiByteToWideChar(CP_UTF8, 0, utf8, -1, wstr, len);
+    return wstr;
+}
+
+// Convertit wide char vers UTF-8
+static char* wchar_to_utf8(const wchar_t *wstr) {
+    if (!wstr) return NULL;
+    int len = WideCharToMultiByte(CP_UTF8, 0, wstr, -1, NULL, 0, NULL, NULL);
+    if (len == 0) return NULL;
+    char *utf8 = (char*)malloc(len);
+    WideCharToMultiByte(CP_UTF8, 0, wstr, -1, utf8, len, NULL, NULL);
+    return utf8;
+}
+
+// Dialogue "Enregistrer sous" natif Windows
+static char* win32_save_dialog(GtkWidget *parent, const char *title, const char *filter_name,
+                                const char *filter_pattern, const char *default_name) {
+    OPENFILENAMEW ofn;
+    wchar_t szFile[MAX_PATH] = {0};
+
+    // Convertir le titre
+    wchar_t *wtitle = utf8_to_wchar(title);
+
+    // Préparer le nom par défaut
+    if (default_name) {
+        wchar_t *wdefault = utf8_to_wchar(default_name);
+        if (wdefault) {
+            wcsncpy(szFile, wdefault, MAX_PATH - 1);
+            free(wdefault);
+        }
+    }
+
+    // Construire le filtre (format: "Description\0*.ext\0\0")
+    wchar_t filter[256];
+    if (filter_name && filter_pattern) {
+        wchar_t *wfilter_name = utf8_to_wchar(filter_name);
+        wchar_t *wfilter_pattern = utf8_to_wchar(filter_pattern);
+        swprintf(filter, 256, L"%s%c%s%c%c", wfilter_name, L'\0', wfilter_pattern, L'\0', L'\0');
+        free(wfilter_name);
+        free(wfilter_pattern);
+    } else {
+        wcscpy(filter, L"All Files (*.*)\0*.*\0\0");
+    }
+
+    ZeroMemory(&ofn, sizeof(ofn));
+    ofn.lStructSize = sizeof(ofn);
+    ofn.hwndOwner = NULL;  // Pas de parent pour éviter les problèmes GTK
+    ofn.lpstrFile = szFile;
+    ofn.nMaxFile = sizeof(szFile) / sizeof(wchar_t);
+    ofn.lpstrFilter = filter;
+    ofn.nFilterIndex = 1;
+    ofn.lpstrFileTitle = NULL;
+    ofn.nMaxFileTitle = 0;
+    ofn.lpstrInitialDir = NULL;
+    ofn.lpstrTitle = wtitle;
+    ofn.Flags = OFN_PATHMUSTEXIST | OFN_OVERWRITEPROMPT;
+
+    char *result = NULL;
+    if (GetSaveFileNameW(&ofn) == TRUE) {
+        result = wchar_to_utf8(szFile);
+    }
+
+    if (wtitle) free(wtitle);
+    return result;
+}
+
+// Dialogue "Ouvrir" natif Windows
+static char* win32_open_dialog(GtkWidget *parent, const char *title, const char *filter_name,
+                                const char *filter_pattern) {
+    OPENFILENAMEW ofn;
+    wchar_t szFile[MAX_PATH] = {0};
+
+    wchar_t *wtitle = utf8_to_wchar(title);
+
+    // Construire le filtre
+    wchar_t filter[256];
+    if (filter_name && filter_pattern) {
+        wchar_t *wfilter_name = utf8_to_wchar(filter_name);
+        wchar_t *wfilter_pattern = utf8_to_wchar(filter_pattern);
+        swprintf(filter, 256, L"%s%c%s%c%c", wfilter_name, L'\0', wfilter_pattern, L'\0', L'\0');
+        free(wfilter_name);
+        free(wfilter_pattern);
+    } else {
+        wcscpy(filter, L"All Files (*.*)\0*.*\0\0");
+    }
+
+    ZeroMemory(&ofn, sizeof(ofn));
+    ofn.lStructSize = sizeof(ofn);
+    ofn.hwndOwner = NULL;
+    ofn.lpstrFile = szFile;
+    ofn.nMaxFile = sizeof(szFile) / sizeof(wchar_t);
+    ofn.lpstrFilter = filter;
+    ofn.nFilterIndex = 1;
+    ofn.lpstrFileTitle = NULL;
+    ofn.nMaxFileTitle = 0;
+    ofn.lpstrInitialDir = NULL;
+    ofn.lpstrTitle = wtitle;
+    ofn.Flags = OFN_PATHMUSTEXIST | OFN_FILEMUSTEXIST;
+
+    char *result = NULL;
+    if (GetOpenFileNameW(&ofn) == TRUE) {
+        result = wchar_to_utf8(szFile);
+    }
+
+    if (wtitle) free(wtitle);
+    return result;
+}
+
+// Dialogue "Ouvrir" multi-sélection natif Windows
+static GSList* win32_open_multi_dialog(GtkWidget *parent, const char *title, const char *filter_name,
+                                        const char *filter_pattern) {
+    OPENFILENAMEW ofn;
+    wchar_t szFile[8192] = {0};  // Buffer plus grand pour multi-sélection
+
+    wchar_t *wtitle = utf8_to_wchar(title);
+
+    // Construire le filtre
+    wchar_t filter[512];
+    if (filter_name && filter_pattern) {
+        wchar_t *wfilter_name = utf8_to_wchar(filter_name);
+        wchar_t *wfilter_pattern = utf8_to_wchar(filter_pattern);
+        swprintf(filter, 512, L"%s%c%s%c%c", wfilter_name, L'\0', wfilter_pattern, L'\0', L'\0');
+        free(wfilter_name);
+        free(wfilter_pattern);
+    } else {
+        wcscpy(filter, L"All Files (*.*)\0*.*\0\0");
+    }
+
+    ZeroMemory(&ofn, sizeof(ofn));
+    ofn.lStructSize = sizeof(ofn);
+    ofn.hwndOwner = NULL;
+    ofn.lpstrFile = szFile;
+    ofn.nMaxFile = sizeof(szFile) / sizeof(wchar_t);
+    ofn.lpstrFilter = filter;
+    ofn.nFilterIndex = 1;
+    ofn.lpstrFileTitle = NULL;
+    ofn.nMaxFileTitle = 0;
+    ofn.lpstrInitialDir = NULL;
+    ofn.lpstrTitle = wtitle;
+    ofn.Flags = OFN_PATHMUSTEXIST | OFN_FILEMUSTEXIST | OFN_ALLOWMULTISELECT | OFN_EXPLORER;
+
+    GSList *file_list = NULL;
+
+    if (GetOpenFileNameW(&ofn) == TRUE) {
+        wchar_t *ptr = szFile;
+        wchar_t dir[MAX_PATH];
+
+        // Premier élément : répertoire ou fichier unique
+        wcscpy(dir, ptr);
+        ptr += wcslen(ptr) + 1;
+
+        // Si ptr pointe sur une chaîne vide, c'est un fichier unique
+        if (*ptr == L'\0') {
+            char *filepath = wchar_to_utf8(dir);
+            if (filepath) {
+                file_list = g_slist_append(file_list, filepath);
+            }
+        } else {
+            // Multi-sélection : dir contient le répertoire, puis les noms de fichiers
+            while (*ptr) {
+                wchar_t fullpath[MAX_PATH];
+                swprintf(fullpath, MAX_PATH, L"%s\\%s", dir, ptr);
+                char *filepath = wchar_to_utf8(fullpath);
+                if (filepath) {
+                    file_list = g_slist_append(file_list, filepath);
+                }
+                ptr += wcslen(ptr) + 1;
+            }
+        }
+    }
+
+    if (wtitle) free(wtitle);
+    return file_list;
+}
+
+#endif  // _WIN32
 void update_interface_language(AppWidgets *app);
 
 //==============================================================================
@@ -1520,6 +1709,19 @@ gboolean prompt_save_changes(AppWidgets *app) {
         return FALSE;  // Annuler l'action
     } else if (response == GTK_RESPONSE_YES) {
         // Ouvrir dialogue "Enregistrer sous"
+        char *filename = NULL;
+
+#ifdef _WIN32
+        // Utiliser dialogue natif Windows
+        const char *default_name = (strlen(app->polar_data->filename) > 0)
+                                    ? app->polar_data->filename
+                                    : "polaire.pol";
+        filename = win32_save_dialog(app->window,
+                                     TR(app, "Enregistrer la polaire", "Save Polar"),
+                                     TR(app, "Fichiers polaires (*.pol)", "Polar files (*.pol)"),
+                                     "*.pol",
+                                     default_name);
+#else
         GtkWidget *save_dialog = gtk_file_chooser_dialog_new(TR(app, "Enregistrer la polaire", "Save Polar"),
                                                               GTK_WINDOW(app->window),
                                                               GTK_FILE_CHOOSER_ACTION_SAVE,
@@ -1543,16 +1745,23 @@ gboolean prompt_save_changes(AppWidgets *app) {
         }
 
         if (gtk_dialog_run(GTK_DIALOG(save_dialog)) == GTK_RESPONSE_ACCEPT) {
-            char *filename = gtk_file_chooser_get_filename(GTK_FILE_CHOOSER(save_dialog));
-            save_polar_file(filename, app->polar_data);
-            gtk_statusbar_push(GTK_STATUSBAR(app->status_bar), 0, filename);
-            g_free(filename);
-        } else {
-            // L'utilisateur a annulé l'enregistrement
-            gtk_widget_destroy(save_dialog);
-            return FALSE;  // Annuler l'action principale
+            filename = gtk_file_chooser_get_filename(GTK_FILE_CHOOSER(save_dialog));
         }
         gtk_widget_destroy(save_dialog);
+#endif
+
+        if (filename) {
+            save_polar_file(filename, app->polar_data);
+            gtk_statusbar_push(GTK_STATUSBAR(app->status_bar), 0, filename);
+#ifdef _WIN32
+            free(filename);
+#else
+            g_free(filename);
+#endif
+        } else {
+            // L'utilisateur a annulé l'enregistrement
+            return FALSE;  // Annuler l'action principale
+        }
     }
 
     return TRUE;  // Continuer l'action
@@ -1565,6 +1774,15 @@ void on_open_clicked(GtkWidget *widget, gpointer user_data) {
     // Demander si l'utilisateur veut enregistrer les modifications
     if (!prompt_save_changes(app)) return;
 
+    char *filename = NULL;
+
+#ifdef _WIN32
+    // Utiliser dialogue natif Windows
+    filename = win32_open_dialog(app->window,
+                                 TR(app, "Ouvrir une polaire", "Open Polar"),
+                                 TR(app, "Fichiers polaires (*.pol)", "Polar files (*.pol)"),
+                                 "*.pol");
+#else
     GtkWidget *dialog = gtk_file_chooser_dialog_new(TR(app, "Ouvrir une polaire", "Open Polar"),
                                                      GTK_WINDOW(app->window),
                                                      GTK_FILE_CHOOSER_ACTION_OPEN,
@@ -1578,7 +1796,12 @@ void on_open_clicked(GtkWidget *widget, gpointer user_data) {
     gtk_file_chooser_add_filter(GTK_FILE_CHOOSER(dialog), filter);
 
     if (gtk_dialog_run(GTK_DIALOG(dialog)) == GTK_RESPONSE_ACCEPT) {
-        char *filename = gtk_file_chooser_get_filename(GTK_FILE_CHOOSER(dialog));
+        filename = gtk_file_chooser_get_filename(GTK_FILE_CHOOSER(dialog));
+    }
+    gtk_widget_destroy(dialog);
+#endif
+
+    if (filename) {
 
         if (load_polar_file(filename, app->polar_data)) {
             // Reconstruire complètement l'interface (les colonnes peuvent changer)
@@ -1615,15 +1838,30 @@ void on_open_clicked(GtkWidget *widget, gpointer user_data) {
             gtk_widget_destroy(error_dialog);
         }
 
+#ifdef _WIN32
+        free(filename);
+#else
         g_free(filename);
+#endif
     }
-
-    gtk_widget_destroy(dialog);
 }
 
 void on_save_clicked(GtkWidget *widget, gpointer user_data) {
     AppWidgets *app = (AppWidgets *)user_data;
 
+    char *filename = NULL;
+
+#ifdef _WIN32
+    // Utiliser dialogue natif Windows
+    const char *default_name = (strlen(app->polar_data->filename) > 0)
+                                ? app->polar_data->filename
+                                : "polar.pol";
+    filename = win32_save_dialog(app->window,
+                                 TR(app, "Enregistrer la polaire", "Save Polar"),
+                                 TR(app, "Fichiers polaires (*.pol)", "Polar files (*.pol)"),
+                                 "*.pol",
+                                 default_name);
+#else
     GtkWidget *dialog = gtk_file_chooser_dialog_new(TR(app, "Enregistrer la polaire", "Save Polar"),
                                                      GTK_WINDOW(app->window),
                                                      GTK_FILE_CHOOSER_ACTION_SAVE,
@@ -1652,13 +1890,20 @@ void on_save_clicked(GtkWidget *widget, gpointer user_data) {
     }
 
     if (gtk_dialog_run(GTK_DIALOG(dialog)) == GTK_RESPONSE_ACCEPT) {
-        char *filename = gtk_file_chooser_get_filename(GTK_FILE_CHOOSER(dialog));
+        filename = gtk_file_chooser_get_filename(GTK_FILE_CHOOSER(dialog));
+    }
+    gtk_widget_destroy(dialog);
+#endif
+
+    if (filename) {
         save_polar_file(filename, app->polar_data);
         gtk_statusbar_push(GTK_STATUSBAR(app->status_bar), 0, app->polar_data->filename);
+#ifdef _WIN32
+        free(filename);
+#else
         g_free(filename);
+#endif
     }
-
-    gtk_widget_destroy(dialog);
 }
 
 void on_print_clicked(GtkWidget *widget, gpointer user_data) {
@@ -2174,6 +2419,15 @@ void on_create_clicked(GtkWidget *widget, gpointer user_data) {
     // Demander confirmation si des modifications non sauvegardées
     if (!prompt_save_changes(app)) return;
 
+    GSList *filenames = NULL;
+
+#ifdef _WIN32
+    // Utiliser dialogue natif Windows
+    filenames = win32_open_multi_dialog(app->window,
+                                       TR(app, "Sélectionner fichier(s) NMEA ou VDR", "Select NMEA or VDR file(s)"),
+                                       TR(app, "Fichiers NMEA et VDR", "NMEA and VDR files"),
+                                       "*.txt;*.nmea;*.log;*.db");
+#else
     // Dialogue pour choisir le(s) fichier(s) de données
     GtkWidget *dialog = gtk_file_chooser_dialog_new(TR(app, "Sélectionner fichier(s) NMEA ou VDR", "Select NMEA or VDR file(s)"),
                                                      GTK_WINDOW(app->window),
@@ -2215,10 +2469,12 @@ void on_create_clicked(GtkWidget *widget, gpointer user_data) {
     gtk_file_chooser_set_filter(GTK_FILE_CHOOSER(dialog), filter_data);
 
     if (gtk_dialog_run(GTK_DIALOG(dialog)) == GTK_RESPONSE_ACCEPT) {
-        GSList *filenames = gtk_file_chooser_get_filenames(GTK_FILE_CHOOSER(dialog));
-        gtk_widget_destroy(dialog);
+        filenames = gtk_file_chooser_get_filenames(GTK_FILE_CHOOSER(dialog));
+    }
+    gtk_widget_destroy(dialog);
+#endif
 
-        if (!filenames) return;
+    if (filenames) {
 
         // Créer le dialogue de progression
         GtkWidget *progress_dialog = gtk_dialog_new();
@@ -2322,6 +2578,15 @@ void on_update_clicked(GtkWidget *widget, gpointer user_data) {
         return;
     }
 
+    GSList *filenames = NULL;
+
+#ifdef _WIN32
+    // Utiliser dialogue natif Windows
+    filenames = win32_open_multi_dialog(app->window,
+                                       TR(app, "Sélectionner fichier(s) NMEA ou VDR pour mise à jour", "Select NMEA or VDR file(s) to update"),
+                                       TR(app, "Fichiers NMEA et VDR", "NMEA and VDR files"),
+                                       "*.txt;*.nmea;*.log;*.db");
+#else
     // Dialogue pour choisir le(s) fichier(s) de données
     GtkWidget *dialog = gtk_file_chooser_dialog_new(TR(app, "Sélectionner fichier(s) NMEA ou VDR pour mise à jour", "Select NMEA or VDR file(s) to update"),
                                                      GTK_WINDOW(app->window),
@@ -2363,10 +2628,12 @@ void on_update_clicked(GtkWidget *widget, gpointer user_data) {
     gtk_file_chooser_set_filter(GTK_FILE_CHOOSER(dialog), filter_data);
 
     if (gtk_dialog_run(GTK_DIALOG(dialog)) == GTK_RESPONSE_ACCEPT) {
-        GSList *filenames = gtk_file_chooser_get_filenames(GTK_FILE_CHOOSER(dialog));
-        gtk_widget_destroy(dialog);
+        filenames = gtk_file_chooser_get_filenames(GTK_FILE_CHOOSER(dialog));
+    }
+    gtk_widget_destroy(dialog);
+#endif
 
-        if (!filenames) return;
+    if (filenames) {
 
         // Créer le dialogue de progression
         GtkWidget *progress_dialog = gtk_dialog_new();
