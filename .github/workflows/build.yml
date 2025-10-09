@@ -41,7 +41,7 @@ jobs:
           BUILD.md
 
     - name: Upload artifact
-      uses: actions/upload-artifact@v3
+      uses: actions/upload-artifact@v4
       with:
         name: polar_doctor-linux-x64
         path: dist/polar_doctor-linux-x64.tar.gz
@@ -116,7 +116,7 @@ jobs:
         zip -r polar_doctor-windows-x64.zip polar_doctor_win/
 
     - name: Upload artifact
-      uses: actions/upload-artifact@v3
+      uses: actions/upload-artifact@v4
       with:
         name: polar_doctor-windows-x64
         path: polar_doctor-windows-x64.zip
@@ -182,7 +182,7 @@ jobs:
           BUILD.md
 
     - name: Upload artifact
-      uses: actions/upload-artifact@v3
+      uses: actions/upload-artifact@v4
       with:
         name: polar_doctor-macos-x64
         path: dist/polar_doctor-macos-x64.tar.gz
@@ -199,19 +199,19 @@ jobs:
       uses: actions/checkout@v3
 
     - name: Download Linux artifact
-      uses: actions/download-artifact@v3
+      uses: actions/download-artifact@v4
       with:
         name: polar_doctor-linux-x64
         path: ./artifacts
 
     - name: Download Windows artifact
-      uses: actions/download-artifact@v3
+      uses: actions/download-artifact@v4
       with:
         name: polar_doctor-windows-x64
         path: ./artifacts
 
     - name: Download macOS artifact
-      uses: actions/download-artifact@v3
+      uses: actions/download-artifact@v4
       with:
         name: polar_doctor-macos-x64
         path: ./artifacts
