@@ -2,6 +2,20 @@
 
 Toutes les modifications notables du projet seront documentées dans ce fichier.
 
+## [1.0.1] - 2025-10-09
+
+### Corrigé
+- 🐛 **[Windows]** Crash de l'application lors de l'ouverture des dialogues de fichiers
+  - Ajout de configuration GTK spécifique Windows dans le code
+  - Désactivation des portails GTK qui causaient des conflits
+  - Force l'utilisation du backend win32 pour GDK
+  - Ajout du script de lancement `polar_doctor_win.bat` comme solution de secours
+
+### Ajouté
+- ✅ Script `polar_doctor_win.bat` pour lancement sécurisé sur Windows
+- ✅ Documentation détaillée du bug fix Windows (WINDOWS_FIX.md)
+- ✅ Instructions de dépannage améliorées dans LISEZMOI.txt
+
 ## [1.0.0] - 2025-10-09
 
 ### Ajouté
