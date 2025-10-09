@@ -1,0 +1,75 @@
+# Executables
+polar_doctor
+polar_doctor.exe
+*.exe
+*.out
+*.app
+
+# Object files
+*.o
+*.ko
+*.obj
+*.elf
+
+# Build directories
+build/
+dist/
+polar_doctor_win/
+
+# CMake
+CMakeCache.txt
+CMakeFiles/
+cmake_install.cmake
+Makefile.cmake
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+
+# Debug files
+*.dSYM/
+*.su
+*.idb
+*.pdb
+
+# Backup files
+*.bak
+*~
+*.orig
+
+# Compiled libraries
+*.so
+*.so.*
+*.dylib
+*.dll
+*.a
+*.lib
+
+# Test files
+test_*
+*.test
+
+# Temporary files
+*.tmp
+*.temp
+.cache/
+
+# Archives
+*.tar.gz
+*.zip
+*.7z
+*.rar
+
+# GTK runtime (pour tests locaux)
+gtk-win/
+
+# Log files
+*.log
+
+# Core dumps
+core
+core.*

@@ -1,0 +1,123 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*.*.*'
+
+jobs:
+  create-release:
+    name: Create GitHub Release
+    runs-on: ubuntu-latest
+    outputs:
+      upload_url: ${{ steps.create_release.outputs.upload_url }}
+
+    steps:
+    - name: Create Release
+      id: create_release
+      uses: actions/create-release@v1
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      with:
+        tag_name: ${{ github.ref }}
+        release_name: Polar Doctor ${{ github.ref }}
+        body: |
+          ## 🎉 Nouvelle version de Polar Doctor !
+
+          ### 📦 Téléchargements
+
+          Choisissez votre plateforme ci-dessous.
+
+          ### 🐧 Linux
+          - Architecture: x86_64
+          - Format: tar.gz
+
+          ### 🪟 Windows
+          - Architecture: x86_64
+          - Format: zip portable (inclut toutes les DLLs)
+
+          ### 🍎 macOS
+          - Architecture: x86_64
+          - Format: Application bundle
+
+          ### 📝 Notes
+
+          Consultez le [README.md](https://github.com/${{ github.repository }}/blob/main/README.md) pour les instructions d'installation.
+
+        draft: false
+        prerelease: false
+
+  build-and-upload:
+    name: Build and Upload Assets
+    needs: create-release
+    strategy:
+      matrix:
+        include:
+          - os: ubuntu-latest
+            platform: linux
+            artifact: polar_doctor-linux-x64.tar.gz
+          - os: windows-latest
+            platform: windows
+            artifact: polar_doctor-windows-x64.zip
+          - os: macos-latest
+            platform: macos
+            artifact: polar_doctor-macos-x64.tar.gz
+
+    runs-on: ${{ matrix.os }}
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v3
+
+    - name: Setup build environment (Linux)
+      if: matrix.platform == 'linux'
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y build-essential libgtk-3-dev libsqlite3-dev pkg-config
+
+    - name: Setup build environment (Windows)
+      if: matrix.platform == 'windows'
+      uses: msys2/setup-msys2@v2
+      with:
+        msystem: MINGW64
+        update: true
+        install: >-
+          mingw-w64-x86_64-gcc
+          mingw-w64-x86_64-gtk3
+          mingw-w64-x86_64-sqlite3
+          mingw-w64-x86_64-pkg-config
+          zip
+
+    - name: Setup build environment (macOS)
+      if: matrix.platform == 'macos'
+      run: |
+        brew install gtk+3 sqlite3 pkg-config
+
+    - name: Build (Linux)
+      if: matrix.platform == 'linux'
+      run: |
+        make
+        make dist
+
+    - name: Build (Windows)
+      if: matrix.platform == 'windows'
+      shell: msys2 {0}
+      run: |
+        make
+        make dist
+
+    - name: Build (macOS)
+      if: matrix.platform == 'macos'
+      run: |
+        make
+        make dist
+
+    - name: Upload Release Asset
+      uses: actions/upload-release-asset@v1
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      with:
+        upload_url: ${{ needs.create-release.outputs.upload_url }}
+        asset_path: ./dist/${{ matrix.artifact }}
+        asset_name: ${{ matrix.artifact }}
+        asset_content_type: application/octet-stream

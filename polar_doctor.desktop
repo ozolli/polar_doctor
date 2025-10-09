@@ -1,0 +1,17 @@
+[Desktop Entry]
+Version=1.0
+Type=Application
+Name=Polar Doctor
+Name[fr]=Polar Doctor
+Comment=Sailing polar diagram editor and generator
+Comment[fr]=Éditeur et générateur de polaires de voilier
+GenericName=Polar Editor
+GenericName[fr]=Éditeur de polaires
+Exec=/home/ozolli/Programmation/polar_generator/polar_doctor
+Icon=/home/ozolli/Programmation/polar_generator/polar_doctor.png
+Terminal=false
+Categories=Science;Education;Graphics;
+Keywords=sailing;polar;diagram;nautical;performance;
+Keywords[fr]=voile;polaire;diagramme;nautique;performance;
+StartupNotify=true
+MimeType=application/x-polar;

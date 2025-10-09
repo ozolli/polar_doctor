@@ -1,0 +1,257 @@
+name: Build Polar Doctor
+
+on:
+  push:
+    branches: [ main, master ]
+    tags:
+      - 'v*'
+  pull_request:
+    branches: [ main, master ]
+  workflow_dispatch:
+
+jobs:
+  build-linux:
+    name: Build on Linux
+    runs-on: ubuntu-latest
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v3
+
+    - name: Install dependencies
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y build-essential libgtk-3-dev libsqlite3-dev pkg-config
+
+    - name: Build
+      run: |
+        gcc -o polar_doctor polar_doctor.c \
+          `pkg-config --cflags --libs gtk+-3.0` \
+          -lm -lsqlite3 -Wall -O2
+
+    - name: Create package
+      run: |
+        mkdir -p dist
+        tar -czf dist/polar_doctor-linux-x64.tar.gz \
+          polar_doctor \
+          polar_doctor.png \
+          polar_doctor.svg \
+          polar_doctor.desktop \
+          README.md \
+          BUILD.md
+
+    - name: Upload artifact
+      uses: actions/upload-artifact@v3
+      with:
+        name: polar_doctor-linux-x64
+        path: dist/polar_doctor-linux-x64.tar.gz
+        retention-days: 30
+
+  build-windows:
+    name: Build on Windows
+    runs-on: windows-latest
+    defaults:
+      run:
+        shell: msys2 {0}
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v3
+
+    - name: Setup MSYS2
+      uses: msys2/setup-msys2@v2
+      with:
+        msystem: MINGW64
+        update: true
+        install: >-
+          mingw-w64-x86_64-gcc
+          mingw-w64-x86_64-gtk3
+          mingw-w64-x86_64-sqlite3
+          mingw-w64-x86_64-pkg-config
+          zip
+
+    - name: Build
+      run: |
+        gcc -o polar_doctor.exe polar_doctor.c \
+          `pkg-config --cflags --libs gtk+-3.0` \
+          -lm -lsqlite3 -mwindows -Wall -O2
+
+    - name: Create portable package
+      run: |
+        mkdir -p polar_doctor_win
+        cp polar_doctor.exe polar_doctor_win/
+        cp polar_doctor.png polar_doctor_win/
+        cp polar_doctor.svg polar_doctor_win/
+        cp README.md polar_doctor_win/
+        cp BUILD.md polar_doctor_win/
+
+        # Copy required DLLs
+        ldd polar_doctor.exe | grep mingw64 | awk '{print $3}' | xargs -I {} cp {} polar_doctor_win/ || true
+
+        # Copy GTK runtime files
+        mkdir -p polar_doctor_win/share/glib-2.0
+        mkdir -p polar_doctor_win/share/icons
+        mkdir -p polar_doctor_win/lib/gdk-pixbuf-2.0
+
+        cp -r /mingw64/share/glib-2.0/schemas polar_doctor_win/share/glib-2.0/ || true
+        cp -r /mingw64/share/icons/Adwaita polar_doctor_win/share/icons/ || true
+        cp -r /mingw64/lib/gdk-pixbuf-2.0/2.10.0 polar_doctor_win/lib/gdk-pixbuf-2.0/ || true
+
+        # Create README for Windows
+        cat > polar_doctor_win/LISEZMOI.txt << 'EOF'
+        Polar Doctor - Version Windows
+        ===============================
+
+        Pour lancer:
+        1. Double-cliquer sur polar_doctor.exe
+
+        Si une erreur apparaît:
+        - Assurez-vous que tous les fichiers .dll sont présents
+        - Lancez depuis l'invite de commande pour voir les erreurs
+
+        Documentation complète: README.md
+        EOF
+
+        # Create zip archive
+        zip -r polar_doctor-windows-x64.zip polar_doctor_win/
+
+    - name: Upload artifact
+      uses: actions/upload-artifact@v3
+      with:
+        name: polar_doctor-windows-x64
+        path: polar_doctor-windows-x64.zip
+        retention-days: 30
+
+  build-macos:
+    name: Build on macOS
+    runs-on: macos-latest
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v3
+
+    - name: Install dependencies
+      run: |
+        brew install gtk+3 sqlite3 pkg-config
+
+    - name: Build
+      run: |
+        gcc -o polar_doctor polar_doctor.c \
+          `pkg-config --cflags --libs gtk+-3.0` \
+          -lsqlite3 -Wall -O2
+
+    - name: Create app bundle
+      run: |
+        mkdir -p PolarDoctor.app/Contents/{MacOS,Resources}
+        cp polar_doctor PolarDoctor.app/Contents/MacOS/
+        cp polar_doctor.png PolarDoctor.app/Contents/Resources/
+
+        # Create Info.plist
+        cat > PolarDoctor.app/Contents/Info.plist << 'EOF'
+        <?xml version="1.0" encoding="UTF-8"?>
+        <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+        <plist version="1.0">
+        <dict>
+            <key>CFBundleExecutable</key>
+            <string>polar_doctor</string>
+            <key>CFBundleIconFile</key>
+            <string>polar_doctor</string>
+            <key>CFBundleIdentifier</key>
+            <string>com.polardoctor.app</string>
+            <key>CFBundleName</key>
+            <string>Polar Doctor</string>
+            <key>CFBundlePackageType</key>
+            <string>APPL</string>
+            <key>CFBundleShortVersionString</key>
+            <string>1.0</string>
+            <key>CFBundleVersion</key>
+            <string>1.0</string>
+            <key>LSMinimumSystemVersion</key>
+            <string>10.13</string>
+            <key>NSHighResolutionCapable</key>
+            <true/>
+        </dict>
+        </plist>
+        EOF
+
+        # Create package
+        mkdir -p dist
+        tar -czf dist/polar_doctor-macos-x64.tar.gz \
+          PolarDoctor.app \
+          README.md \
+          BUILD.md
+
+    - name: Upload artifact
+      uses: actions/upload-artifact@v3
+      with:
+        name: polar_doctor-macos-x64
+        path: dist/polar_doctor-macos-x64.tar.gz
+        retention-days: 30
+
+  create-release:
+    name: Create Release
+    needs: [build-linux, build-windows, build-macos]
+    runs-on: ubuntu-latest
+    if: startsWith(github.ref, 'refs/tags/')
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v3
+
+    - name: Download Linux artifact
+      uses: actions/download-artifact@v3
+      with:
+        name: polar_doctor-linux-x64
+        path: ./artifacts
+
+    - name: Download Windows artifact
+      uses: actions/download-artifact@v3
+      with:
+        name: polar_doctor-windows-x64
+        path: ./artifacts
+
+    - name: Download macOS artifact
+      uses: actions/download-artifact@v3
+      with:
+        name: polar_doctor-macos-x64
+        path: ./artifacts
+
+    - name: Create Release
+      uses: softprops/action-gh-release@v1
+      with:
+        files: |
+          artifacts/polar_doctor-linux-x64.tar.gz
+          artifacts/polar_doctor-windows-x64.zip
+          artifacts/polar_doctor-macos-x64.tar.gz
+        body: |
+          # Polar Doctor ${{ github.ref_name }}
+
+          ## 📦 Installation
+
+          ### Linux
+          ```bash
+          tar -xzf polar_doctor-linux-x64.tar.gz
+          ./polar_doctor
+          ```
+
+          ### Windows
+          1. Extraire `polar_doctor-windows-x64.zip`
+          2. Double-cliquer sur `polar_doctor.exe`
+
+          ### macOS
+          ```bash
+          tar -xzf polar_doctor-macos-x64.tar.gz
+          open PolarDoctor.app
+          ```
+
+          ## 📝 Changelog
+
+          Voir les commits pour les détails des changements.
+
+          ## 🐛 Bugs
+
+          Signalez les bugs sur https://github.com/${{ github.repository }}/issues
+        draft: false
+        prerelease: false
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
