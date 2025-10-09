@@ -1,9 +1,7 @@
 {
   "permissions": {
     "allow": [
-      "Bash(python3:*)",
-      "Bash(gcc:*)",
-      "WebFetch(domain:github.com)"
+      "Bash(git commit:*)"
     ],
     "deny": [],
     "ask": []

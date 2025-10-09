@@ -84,7 +84,6 @@ jobs:
       run: |
         mkdir -p polar_doctor_win
         cp polar_doctor.exe polar_doctor_win/
-        cp polar_doctor_win.bat polar_doctor_win/ || echo "Warning: polar_doctor_win.bat not found"
         cp polar_doctor.png polar_doctor_win/
         cp polar_doctor.svg polar_doctor_win/
         cp README.md polar_doctor_win/
@@ -108,14 +107,12 @@ jobs:
         ===============================
 
         Pour lancer:
-        1. Double-cliquer sur polar_doctor.exe
-        2. Ou utiliser polar_doctor_win.bat (recommandé si problèmes de dialogues)
+        - Double-cliquer sur polar_doctor.exe
 
-        Si les dialogues de fichiers ferment l'application:
-        - Utilisez polar_doctor_win.bat au lieu de polar_doctor.exe directement
-        - Ce script configure l'environnement GTK correctement
+        Note: Cette version utilise des dialogues de fichiers natifs Windows
+        pour une meilleure stabilité.
 
-        Si une autre erreur apparaît:
+        Si une erreur apparaît:
         - Assurez-vous que tous les fichiers .dll sont présents
         - Lancez depuis l'invite de commande pour voir les erreurs détaillées
 
