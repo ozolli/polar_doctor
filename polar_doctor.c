@@ -2086,7 +2086,7 @@ void print_page(GtkPrintOperation *operation, GtkPrintContext *context, gint pag
     int max_rows = (int)((data_height - start_y - 10) / row_height);
     if (num_rows > max_rows) num_rows = max_rows;
 
-    cairo_set_font_size(cr, 7);
+    cairo_set_font_size(cr, 10);
 
     // En-tête
     cairo_set_source_rgb(cr, 0.9, 0.9, 0.9);
@@ -2250,7 +2250,7 @@ void print_page(GtkPrintOperation *operation, GtkPrintContext *context, gint pag
         // Labels TWA
         if (angle % 15 == 0) {
             cairo_set_source_rgb(cr, 0.2, 0.2, 0.2);
-            cairo_set_font_size(cr, 8);
+            cairo_set_font_size(cr, 9);
             char angle_label[16];
             snprintf(angle_label, sizeof(angle_label), "%d°", angle);
             double label_r = radius + 15;
@@ -2354,7 +2354,7 @@ void print_page(GtkPrintOperation *operation, GtkPrintContext *context, gint pag
     vmg_y += 15;
 
     // En-têtes du tableau VMG
-    cairo_set_font_size(cr, 7);
+    cairo_set_font_size(cr, 9);
     cairo_move_to(cr, vmg_x, vmg_y);
     cairo_show_text(cr, "TWS (kn)");
     cairo_move_to(cr, vmg_x + 40, vmg_y);
@@ -2362,7 +2362,7 @@ void print_page(GtkPrintOperation *operation, GtkPrintContext *context, gint pag
     cairo_move_to(cr, vmg_x + 110, vmg_y);
     cairo_show_text(cr, TR(app, "max VMG down", "max VMG down"));
 
-    vmg_y += 10;
+    vmg_y += 12;
 
     // Ligne de séparation
     cairo_set_source_rgb(cr, 0.5, 0.5, 0.5);
@@ -2371,11 +2371,11 @@ void print_page(GtkPrintOperation *operation, GtkPrintContext *context, gint pag
     cairo_line_to(cr, vmg_x + 180, vmg_y);
     cairo_stroke(cr);
 
-    vmg_y += 8;  // Plus d'espace après la ligne de séparation
+    vmg_y += 10;  // Plus d'espace après la ligne de séparation
 
     // Calculer et afficher VMG pour chaque TWS
     cairo_select_font_face(cr, "Sans", CAIRO_FONT_SLANT_NORMAL, CAIRO_FONT_WEIGHT_NORMAL);
-    cairo_set_font_size(cr, 7);
+    cairo_set_font_size(cr, 9);
 
     for (int speed_idx = tws_from_idx; speed_idx <= tws_to_idx && speed_idx < data->num_speeds; speed_idx++) {
         int tws = data->tws_values[speed_idx];
