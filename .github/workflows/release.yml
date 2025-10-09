@@ -84,7 +84,7 @@ jobs:
       run: |
         mkdir -p polar_doctor_win
         cp polar_doctor.exe polar_doctor_win/
-        cp polar_doctor_win.bat polar_doctor_win/
+        cp polar_doctor_win.bat polar_doctor_win/ || echo "Warning: polar_doctor_win.bat not found"
         cp polar_doctor.png polar_doctor_win/
         cp polar_doctor.svg polar_doctor_win/
         cp README.md polar_doctor_win/
