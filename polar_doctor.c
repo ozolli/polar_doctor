@@ -2558,7 +2558,12 @@ void on_create_clicked(GtkWidget *widget, gpointer user_data) {
         }
 
         free_polar_grid(&grid);
+#ifdef _WIN32
+        // Sur Windows, les fichiers sont alloués avec malloc(), pas g_malloc()
+        g_slist_free_full(filenames, free);
+#else
         g_slist_free_full(filenames, g_free);
+#endif
     }
 }
 
@@ -2730,7 +2735,12 @@ void on_update_clicked(GtkWidget *widget, gpointer user_data) {
         }
 
         free_polar_grid(&grid);
+#ifdef _WIN32
+        // Sur Windows, les fichiers sont alloués avec malloc(), pas g_malloc()
+        g_slist_free_full(filenames, free);
+#else
         g_slist_free_full(filenames, g_free);
+#endif
     }
 }
 
