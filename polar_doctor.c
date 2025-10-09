@@ -786,6 +786,37 @@ void load_polar_from_memory(PolarData *data, polar_grid_t *grid) {
     }
 }
 
+// Mettre à jour une polaire existante depuis la grille (conserve la structure TWS/TWA)
+void update_polar_from_grid(PolarData *data, double polar[PG_MAX_ANGLES][PG_MAX_SPEEDS]) {
+    // Parcourir les angles et vitesses existants dans la polaire
+    for (int angle_idx = 0; angle_idx < data->num_angles; angle_idx++) {
+        if (!data->twa_present[angle_idx]) continue;
+
+        int twa = data->twa_values[angle_idx];
+
+        for (int speed_idx = 0; speed_idx < data->num_speeds; speed_idx++) {
+            int tws = data->tws_values[speed_idx];
+
+            // Arrondir aux buckets de la grille
+            int angle_bucket = round_to_bucket(twa, PG_ANGLE_STEP);
+            int speed_bucket = round_to_bucket(tws, PG_SPEED_STEP);
+
+            // Vérifier les limites
+            if (angle_bucket >= 0 && angle_bucket < PG_MAX_ANGLES &&
+                speed_bucket >= 0 && speed_bucket < PG_MAX_SPEEDS) {
+
+                double bsp = polar[angle_bucket][speed_bucket];
+                if (bsp > 0.0) {
+                    data->polar_data[angle_idx][speed_idx] = bsp;
+                    snprintf(data->polar_data_str[angle_idx][speed_idx], 16, "%.2f", bsp);
+                }
+            }
+        }
+    }
+
+    data->modified = TRUE;
+}
+
 // Charger une polaire depuis la grille polar_generator directement en mémoire
 void load_polar_from_grid(PolarData *data, polar_grid_t *grid, double polar[PG_MAX_ANGLES][PG_MAX_SPEEDS]) {
     // Réinitialiser les données
@@ -2691,18 +2722,8 @@ void on_update_clicked(GtkWidget *widget, gpointer user_data) {
 
             gtk_widget_destroy(progress_dialog);
 
-            // Sauvegarder le nom de fichier actuel
-            char saved_filename[256];
-            strncpy(saved_filename, app->polar_data->filename, sizeof(saved_filename) - 1);
-            saved_filename[sizeof(saved_filename) - 1] = '\0';
-
-            // Charger directement en mémoire
-            load_polar_from_grid(app->polar_data, &grid, polar);
-
-            // Restaurer le nom de fichier et marquer comme modifié
-            strncpy(app->polar_data->filename, saved_filename, sizeof(app->polar_data->filename) - 1);
-            app->polar_data->filename[sizeof(app->polar_data->filename) - 1] = '\0';
-            app->polar_data->modified = TRUE;
+            // Mettre à jour les valeurs de la polaire existante (conserve la structure TWS/TWA)
+            update_polar_from_grid(app->polar_data, polar);
 
             // Reconstruire l'interface
             rebuild_data_tab(app);
