@@ -16,7 +16,7 @@ jobs:
 
     steps:
     - name: Checkout code
-      uses: actions/checkout@v3
+      uses: actions/checkout@v4
 
     - name: Install dependencies
       run: |
@@ -56,7 +56,7 @@ jobs:
 
     steps:
     - name: Checkout code
-      uses: actions/checkout@v3
+      uses: actions/checkout@v4
 
     - name: Setup MSYS2
       uses: msys2/setup-msys2@v2
@@ -128,7 +128,7 @@ jobs:
 
     steps:
     - name: Checkout code
-      uses: actions/checkout@v3
+      uses: actions/checkout@v4
 
     - name: Install dependencies
       run: |
@@ -196,7 +196,7 @@ jobs:
 
     steps:
     - name: Checkout code
-      uses: actions/checkout@v3
+      uses: actions/checkout@v4
 
     - name: Download Linux artifact
       uses: actions/download-artifact@v4
@@ -217,7 +217,7 @@ jobs:
         path: ./artifacts
 
     - name: Create Release
-      uses: softprops/action-gh-release@v1
+      uses: softprops/action-gh-release@v2
       with:
         files: |
           artifacts/polar_doctor-linux-x64.tar.gz
