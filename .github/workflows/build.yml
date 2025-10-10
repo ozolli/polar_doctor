@@ -93,8 +93,18 @@ jobs:
         cp README.md polar_doctor_win/
         cp BUILD.md polar_doctor_win/
 
-        # Copy required DLLs
-        ldd polar_doctor.exe | grep mingw64 | awk '{print $3}' | xargs -I {} cp {} polar_doctor_win/ || true
+        # Copy all required DLLs recursively
+        function copy_dlls() {
+          local exe_or_dll="$1"
+          ldd "$exe_or_dll" | grep mingw64 | awk '{print $3}' | while read dll; do
+            if [ -f "$dll" ] && [ ! -f "polar_doctor_win/$(basename "$dll")" ]; then
+              cp "$dll" polar_doctor_win/
+              copy_dlls "$dll"
+            fi
+          done
+        }
+
+        copy_dlls polar_doctor.exe
 
         # Copy GTK runtime files
         mkdir -p polar_doctor_win/share/glib-2.0
@@ -104,6 +114,10 @@ jobs:
         cp -r /mingw64/share/glib-2.0/schemas polar_doctor_win/share/glib-2.0/ || true
         cp -r /mingw64/share/icons/Adwaita polar_doctor_win/share/icons/ || true
         cp -r /mingw64/lib/gdk-pixbuf-2.0/2.10.0 polar_doctor_win/lib/gdk-pixbuf-2.0/ || true
+
+        # List all copied DLLs for debugging
+        echo "Copied DLLs:"
+        ls -lh polar_doctor_win/*.dll
 
         # Create README for Windows
         cat > polar_doctor_win/LISEZMOI.txt << 'EOF'
