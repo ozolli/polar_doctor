@@ -2034,10 +2034,15 @@ static double get_print_scale(void) {
     return WINDOWS_PRINT_SCALE;
 }
 
-// Fonction helper pour définir la taille de police
-// Note: Sous Windows, cairo_scale() appliqué globalement gère le scaling
+// Fonction helper pour définir la taille de police avec scaling Windows
+// Applique uniquement aux polices (pas au diagramme/layout)
 static void set_print_font_size(cairo_t *cr, double size) {
+#ifdef _WIN32
+    double scale = get_print_scale();
+    cairo_set_font_size(cr, size * scale);
+#else
     cairo_set_font_size(cr, size);
+#endif
 }
 
 void print_begin(GtkPrintOperation *operation, GtkPrintContext *context, gpointer user_data) {
@@ -2049,7 +2054,7 @@ void print_page(GtkPrintOperation *operation, GtkPrintContext *context, gint pag
     PolarData *data = app->polar_data;
     cairo_t *cr = gtk_print_context_get_cairo_context(context);
 
-    // Correction DPI Windows
+    // Log de debug Windows
 #ifdef _WIN32
     gdouble dpi_x = gtk_print_context_get_dpi_x(context);
     gdouble dpi_y = gtk_print_context_get_dpi_y(context);
@@ -2063,11 +2068,8 @@ void print_page(GtkPrintOperation *operation, GtkPrintContext *context, gint pag
         fprintf(log, "DPI Y: %.2f\n", dpi_y);
 
         double scale = get_print_scale();
-        fprintf(log, "Scale factor: %.2f\n", scale);
-
-        // Toujours appliquer le scaling sous Windows
-        cairo_scale(cr, scale, scale);
-        fprintf(log, "Scaling applied: YES\n");
+        fprintf(log, "Font scale factor: %.2f\n", scale);
+        fprintf(log, "Note: Scaling applied only to fonts, not diagram\n");
 
         fclose(log);
 
@@ -2076,10 +2078,6 @@ void print_page(GtkPrintOperation *operation, GtkPrintContext *context, gint pag
     } else {
         // Si l'ouverture échoue, afficher dans la console
         g_print("ERREUR: Impossible de créer polar_doctor_print.log\n");
-
-        // Appliquer quand même le scaling
-        double scale = get_print_scale();
-        cairo_scale(cr, scale, scale);
     }
 #endif
 
