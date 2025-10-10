@@ -26,7 +26,7 @@ Toutes les modifications notables du projet seront documentées dans ce fichier.
 - ✅ Interface GTK+3 complète et moderne
 - ✅ Interface multilingue (Français/English)
 - ✅ Calcul automatique des angles VMG (près et portant)
-- ✅ Impression et export PDF
+- ✅ Export PDF avec mise en page professionnelle
 - ✅ Édition graphique interactive du tableau de données
 - ✅ Visualisation polaire en temps réel avec interpolation Catmull-Rom
 - ✅ Mode mise à jour (conserve les meilleures performances)

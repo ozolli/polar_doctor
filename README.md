@@ -4,7 +4,7 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![Platform](https://img.shields.io/badge/platform-Linux%20%7C%20Windows%20%7C%20macOS-blue)](https://github.com/ozolli/polar_doctor)
 
-**Polar Doctor** est un éditeur et générateur de diagrammes polaires pour voiliers. Il permet de créer, éditer, analyser et imprimer des polaires de performance à partir de données NMEA et VDR.
+**Polar Doctor** est un éditeur et générateur de diagrammes polaires pour voiliers. Il permet de créer, éditer, analyser et exporter des polaires de performance à partir de données NMEA et VDR.
 
 ![Polar Doctor](polar_doctor.png)
 
@@ -32,17 +32,18 @@
 - ✅ Tableau récapitulatif par vitesse de vent
 - ✅ Indicateurs visuels colorés
 
-### Impression et export
-- ✅ Impression complète (données + diagramme + VMG)
-- ✅ Export PDF
+### Export et impression
+- ✅ **Export PDF** (données + diagramme + VMG)
+- ✅ Nom de fichier automatique (nom de la polaire)
 - ✅ Format .pol compatible
 - ✅ Mise en page professionnelle
+- ✅ Taille de texte ajustable (variable POLAR_PRINT_SCALE)
 
 ### Interface multilingue
 - 🇫🇷 **Français**
 - 🇬🇧 **English**
 - ✅ Changement de langue à la volée
-- ✅ Traduction complète (interface + aide + impression)
+- ✅ Traduction complète (interface + aide + export)
 
 ## 📦 Installation
 
@@ -61,11 +62,19 @@ sudo make install
 polar_doctor
 ```
 
-### Autres plateformes
+### Binaires pré-compilés
+
+Téléchargez depuis [GitHub Releases](https://github.com/ozolli/polar_doctor/releases) :
+- 🐧 **Linux x86_64** (PC standard)
+- 🐧 **Linux ARM64** (Raspberry Pi, serveurs ARM)
+- 🍎 **macOS x64** (Intel/Apple Silicon avec Rosetta)
+- 🪟 **Windows x64** (package portable avec DLLs)
+
+### Compilation depuis les sources
 
 Consultez [BUILD.md](BUILD.md) pour les instructions détaillées pour :
 - 🐧 Linux (Debian, Ubuntu, Fedora, Arch)
-- 🪟 Windows (MSYS2, MinGW, Visual Studio)
+- 🪟 Windows (MSYS2, MinGW)
 - 🍎 macOS (Homebrew)
 - 🐳 Docker
 
@@ -113,10 +122,22 @@ Consultez [BUILD.md](BUILD.md) pour les instructions détaillées pour :
 - Angles optimaux pour le près et le portant
 - Tableau récapitulatif par vitesse de vent
 
-### 5. Imprimer ou exporter
+### 5. Exporter en PDF
 
-- Cliquer sur **"Imprimer"**
-- Choisir "Imprimer" ou "Imprimer vers un fichier" (PDF)
+- Cliquer sur **"Export PDF"**
+- Choisir l'emplacement de sauvegarde
+- Le fichier PDF sera nommé automatiquement d'après la polaire
+- **Windows :** Utilise des dialogues natifs Windows pour plus de stabilité
+- **Ajuster la taille du texte :** Définir `POLAR_PRINT_SCALE` (0.5 à 3.0, défaut 1.0)
+  ```bash
+  # Linux/macOS
+  export POLAR_PRINT_SCALE=1.5
+  ./polar_doctor
+
+  # Windows
+  set POLAR_PRINT_SCALE=1.5
+  polar_doctor.exe
+  ```
 
 ## 📊 Format des fichiers
 
@@ -157,7 +178,6 @@ TWA\TWS;6;8;10;12;14
 | `Ctrl+O` | Ouvrir |
 | `Ctrl+S` | Enregistrer |
 | `Ctrl+N` | Créer nouvelle polaire |
-| `Ctrl+P` | Imprimer |
 | `F1` | Aide |
 | `Ctrl+Q` | Quitter |
 
@@ -211,7 +231,7 @@ polar_doctor.c           # Code source principal (130+ KB)
 │   ├── Éditeur tableau
 │   ├── Diagramme polaire
 │   ├── Tableau VMG
-│   └── Impression
+│   └── Export PDF
 └── I18N
     ├── Français
     └── English
