@@ -2059,14 +2059,22 @@ void print_page(GtkPrintOperation *operation, GtkPrintContext *context, gint pag
     gdouble dpi_x = gtk_print_context_get_dpi_x(context);
     gdouble dpi_y = gtk_print_context_get_dpi_y(context);
 
-    // Debug info (peut être commenté en production)
-    g_print("Windows Print DPI: X=%.2f, Y=%.2f\n", dpi_x, dpi_y);
+    // Log de debug dans un fichier
+    FILE *log = fopen("polar_doctor_print.log", "w");
+    if (log) {
+        fprintf(log, "Windows Print Debug\n");
+        fprintf(log, "===================\n");
+        fprintf(log, "DPI X: %.2f\n", dpi_x);
+        fprintf(log, "DPI Y: %.2f\n", dpi_y);
 
-    // Si Windows rapporte des DPI trop bas, appliquer un scale global
-    if (dpi_x < 90.0) {
         double scale = get_print_scale();
+        fprintf(log, "Scale factor: %.2f\n", scale);
+
+        // Toujours appliquer le scaling sous Windows
         cairo_scale(cr, scale, scale);
-        g_print("Applying scale factor: %.2f\n", scale);
+        fprintf(log, "Scaling applied: YES\n");
+
+        fclose(log);
     }
 #endif
 
