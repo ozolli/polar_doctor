@@ -19,6 +19,12 @@
 #ifdef _WIN32
 #include <windows.h>
 #define GTK_FILE_CHOOSER_NATIVE_DISABLED 1
+// Facteurs d'échelle pour l'impression sous Windows
+#define WINDOWS_PRINT_SCALE 1.5  // Facteur d'échelle global
+#define WINDOWS_FONT_SCALE 1.3   // Facteur pour les polices uniquement
+#else
+#define WINDOWS_PRINT_SCALE 1.0
+#define WINDOWS_FONT_SCALE 1.0
 #endif
 
 #define MAX_ANGLES 37    // 0° à 180° par pas de 5°
@@ -2018,6 +2024,27 @@ void on_print_clicked(GtkWidget *widget, gpointer user_data) {
     g_object_unref(print);
 }
 
+// Fonction pour obtenir le facteur d'échelle (permet override par variable d'env)
+static double get_print_scale(void) {
+    const char *scale_env = getenv("POLAR_PRINT_SCALE");
+    if (scale_env) {
+        double scale = atof(scale_env);
+        if (scale > 0.5 && scale < 3.0) {
+            return scale;
+        }
+    }
+    return WINDOWS_PRINT_SCALE;
+}
+
+// Fonction helper pour définir la taille de police avec correction Windows
+static void set_print_font_size(cairo_t *cr, double size) {
+#ifdef _WIN32
+    cairo_set_font_size(cr, size * WINDOWS_FONT_SCALE);
+#else
+    cairo_set_font_size(cr, size);
+#endif
+}
+
 void print_begin(GtkPrintOperation *operation, GtkPrintContext *context, gpointer user_data) {
     gtk_print_operation_set_n_pages(operation, 1);
 }
@@ -2026,6 +2053,22 @@ void print_page(GtkPrintOperation *operation, GtkPrintContext *context, gint pag
     AppWidgets *app = (AppWidgets *)user_data;
     PolarData *data = app->polar_data;
     cairo_t *cr = gtk_print_context_get_cairo_context(context);
+
+    // Correction DPI Windows
+#ifdef _WIN32
+    gdouble dpi_x = gtk_print_context_get_dpi_x(context);
+    gdouble dpi_y = gtk_print_context_get_dpi_y(context);
+
+    // Debug info (peut être commenté en production)
+    g_print("Windows Print DPI: X=%.2f, Y=%.2f\n", dpi_x, dpi_y);
+
+    // Si Windows rapporte des DPI trop bas, appliquer un scale global
+    if (dpi_x < 90.0) {
+        double scale = get_print_scale();
+        cairo_scale(cr, scale, scale);
+        g_print("Applying scale factor: %.2f\n", scale);
+    }
+#endif
 
     double width = gtk_print_context_get_width(context);
     double height = gtk_print_context_get_height(context);
@@ -2044,7 +2087,7 @@ void print_page(GtkPrintOperation *operation, GtkPrintContext *context, gint pag
     // Titre avec nom du fichier sans extension .pol
     cairo_set_source_rgb(cr, 0.0, 0.0, 0.0);
     cairo_select_font_face(cr, "Sans", CAIRO_FONT_SLANT_NORMAL, CAIRO_FONT_WEIGHT_BOLD);
-    cairo_set_font_size(cr, 12);
+    set_print_font_size(cr, 12);
     cairo_move_to(cr, 10, 15);
 
     // Extraire le nom du fichier sans chemin et sans extension .pol
@@ -2086,7 +2129,7 @@ void print_page(GtkPrintOperation *operation, GtkPrintContext *context, gint pag
     int max_rows = (int)((data_height - start_y - 10) / row_height);
     if (num_rows > max_rows) num_rows = max_rows;
 
-    cairo_set_font_size(cr, 10);
+    set_print_font_size(cr, 7);
 
     // En-tête
     cairo_set_source_rgb(cr, 0.9, 0.9, 0.9);
@@ -2176,7 +2219,7 @@ void print_page(GtkPrintOperation *operation, GtkPrintContext *context, gint pag
     // Titre
     cairo_set_source_rgb(cr, 0.0, 0.0, 0.0);
     cairo_select_font_face(cr, "Sans", CAIRO_FONT_SLANT_NORMAL, CAIRO_FONT_WEIGHT_BOLD);
-    cairo_set_font_size(cr, 12);
+    set_print_font_size(cr, 12);
     cairo_move_to(cr, 10, 15);
     cairo_show_text(cr, TR(app, "Diagramme de la polaire", "Polar Diagram"));
 
@@ -2232,7 +2275,7 @@ void print_page(GtkPrintOperation *operation, GtkPrintContext *context, gint pag
 
         // Labels BSP
         cairo_set_source_rgb(cr, 0.3, 0.3, 0.3);
-        cairo_set_font_size(cr, 7);
+        set_print_font_size(cr, 7);
         char label[16];
         snprintf(label, sizeof(label), "%d", i);
         cairo_move_to(cr, center_x + 1, center_y - r - 2);
@@ -2250,7 +2293,7 @@ void print_page(GtkPrintOperation *operation, GtkPrintContext *context, gint pag
         // Labels TWA
         if (angle % 15 == 0) {
             cairo_set_source_rgb(cr, 0.2, 0.2, 0.2);
-            cairo_set_font_size(cr, 9);
+            set_print_font_size(cr, 8);
             char angle_label[16];
             snprintf(angle_label, sizeof(angle_label), "%d°", angle);
             double label_r = radius + 15;
@@ -2347,14 +2390,14 @@ void print_page(GtkPrintOperation *operation, GtkPrintContext *context, gint pag
     // Titre VMG
     cairo_set_source_rgb(cr, 0.0, 0.0, 0.0);
     cairo_select_font_face(cr, "Sans", CAIRO_FONT_SLANT_NORMAL, CAIRO_FONT_WEIGHT_BOLD);
-    cairo_set_font_size(cr, 10);
+    set_print_font_size(cr, 9);
     cairo_move_to(cr, vmg_x, vmg_y);
     cairo_show_text(cr, "VMG (Velocity Made Good)");
 
     vmg_y += 15;
 
     // En-têtes du tableau VMG
-    cairo_set_font_size(cr, 9);
+    set_print_font_size(cr, 7);
     cairo_move_to(cr, vmg_x, vmg_y);
     cairo_show_text(cr, "TWS (kn)");
     cairo_move_to(cr, vmg_x + 40, vmg_y);
@@ -2375,7 +2418,7 @@ void print_page(GtkPrintOperation *operation, GtkPrintContext *context, gint pag
 
     // Calculer et afficher VMG pour chaque TWS
     cairo_select_font_face(cr, "Sans", CAIRO_FONT_SLANT_NORMAL, CAIRO_FONT_WEIGHT_NORMAL);
-    cairo_set_font_size(cr, 9);
+    set_print_font_size(cr, 7);
 
     for (int speed_idx = tws_from_idx; speed_idx <= tws_to_idx && speed_idx < data->num_speeds; speed_idx++) {
         int tws = data->tws_values[speed_idx];
