@@ -123,14 +123,11 @@ jobs:
         Documentation complète: README.md
         EOF
 
-        # Create zip archive
-        zip -r polar_doctor-windows-x64.zip polar_doctor_win/
-
     - name: Upload artifact
       uses: actions/upload-artifact@v4
       with:
         name: polar_doctor-windows-x64
-        path: polar_doctor-windows-x64.zip
+        path: polar_doctor_win/
         retention-days: 30
 
   create-release:
@@ -153,7 +150,14 @@ jobs:
       uses: actions/download-artifact@v4
       with:
         name: polar_doctor-windows-x64
-        path: ./artifacts
+        path: ./polar_doctor_win
+
+    - name: Create Windows zip
+      run: |
+        mkdir -p artifacts
+        cd polar_doctor_win
+        zip -r ../artifacts/polar_doctor-windows-x64.zip .
+        cd ..
 
     - name: Generate checksums
       run: |
