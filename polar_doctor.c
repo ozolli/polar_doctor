@@ -96,6 +96,7 @@ typedef struct {
     GtkWidget *btn_create;
     GtkWidget *btn_update;
     GtkWidget *btn_print;
+    GtkWidget *btn_export_pdf;
     GtkWidget *btn_add_twa;
     GtkWidget *btn_add_tws;
     GtkWidget *btn_delete;
@@ -141,6 +142,7 @@ void on_tws_changed(GtkWidget *widget, gpointer user_data);
 void on_cell_changed(GtkEntry *entry, gpointer user_data);
 gboolean prompt_save_changes(AppWidgets *app);
 void on_print_clicked(GtkWidget *widget, gpointer user_data);
+void on_export_pdf_clicked(GtkWidget *widget, gpointer user_data);
 void print_begin(GtkPrintOperation *operation, GtkPrintContext *context, gpointer user_data);
 void print_page(GtkPrintOperation *operation, GtkPrintContext *context, gint page_nr, gpointer user_data);
 void on_create_clicked(GtkWidget *widget, gpointer user_data);
@@ -1994,6 +1996,17 @@ void on_save_clicked(GtkWidget *widget, gpointer user_data) {
 void on_print_clicked(GtkWidget *widget, gpointer user_data) {
     AppWidgets *app = (AppWidgets *)user_data;
 
+#ifdef _WIN32
+    // Log de debug au début de l'impression
+    FILE *log = fopen("polar_doctor_print.log", "w");
+    if (log) {
+        fprintf(log, "Windows Print Debug\n");
+        fprintf(log, "===================\n");
+        fprintf(log, "Print operation starting...\n");
+        fclose(log);
+    }
+#endif
+
     GtkPrintOperation *print = gtk_print_operation_new();
 
     // Callback pour dessiner la page
@@ -2007,19 +2020,158 @@ void on_print_clicked(GtkWidget *widget, gpointer user_data) {
                                                               &error);
 
     if (result == GTK_PRINT_OPERATION_RESULT_ERROR) {
+#ifdef _WIN32
+        // Ajouter détails de l'erreur au log
+        FILE *log2 = fopen("polar_doctor_print.log", "a");
+        if (log2) {
+            fprintf(log2, "\nERROR: %s\n", error->message);
+            fprintf(log2, "\nSolution: Utilisez 'Exporter PDF' depuis le menu Fichier\n");
+            fprintf(log2, "ou sélectionnez 'Microsoft Print to PDF' dans le dialogue d'impression.\n");
+            fclose(log2);
+        }
+#endif
         GtkWidget *error_dialog = gtk_message_dialog_new(GTK_WINDOW(app->window),
                                                           GTK_DIALOG_MODAL,
                                                           GTK_MESSAGE_ERROR,
                                                           GTK_BUTTONS_OK,
-                                                          "%s%s",
+                                                          "%s%s\n\n%s",
                                                           TR(app, "Erreur d'impression: ", "Print error: "),
-                                                          error->message);
+                                                          error->message,
+                                                          TR(app, "Conseil: Utilisez 'Exporter PDF' ou sélectionnez 'Microsoft Print to PDF' dans le dialogue.",
+                                                             "Tip: Use 'Export PDF' or select 'Microsoft Print to PDF' in the dialog."));
         gtk_dialog_run(GTK_DIALOG(error_dialog));
         gtk_widget_destroy(error_dialog);
         g_error_free(error);
     }
+#ifdef _WIN32
+    else {
+        // Succès - ajouter au log
+        FILE *log3 = fopen("polar_doctor_print.log", "a");
+        if (log3) {
+            fprintf(log3, "Print operation completed successfully\n");
+            fclose(log3);
+        }
+    }
+#endif
 
     g_object_unref(print);
+}
+
+// Fonction pour exporter en PDF (alternative à l'impression pour Windows)
+void on_export_pdf_clicked(GtkWidget *widget, gpointer user_data) {
+    AppWidgets *app = (AppWidgets *)user_data;
+
+#ifdef _WIN32
+    // Utiliser le dialogue natif Windows pour sauvegarder
+    OPENFILENAMEW ofn;
+    wchar_t filename[MAX_PATH] = L"polar_diagram.pdf";
+
+    ZeroMemory(&ofn, sizeof(ofn));
+    ofn.lStructSize = sizeof(ofn);
+    ofn.hwndOwner = NULL;
+    ofn.lpstrFile = filename;
+    ofn.nMaxFile = MAX_PATH;
+    ofn.lpstrFilter = L"PDF Files\0*.pdf\0All Files\0*.*\0";
+    ofn.nFilterIndex = 1;
+    ofn.lpstrFileTitle = NULL;
+    ofn.nMaxFileTitle = 0;
+    ofn.lpstrInitialDir = NULL;
+    ofn.Flags = OFN_PATHMUSTEXIST | OFN_OVERWRITEPROMPT;
+    ofn.lpstrDefExt = L"pdf";
+
+    if (GetSaveFileNameW(&ofn)) {
+        // Convertir wchar_t* en char*
+        char pdf_path[MAX_PATH * 3];
+        WideCharToMultiByte(CP_UTF8, 0, filename, -1, pdf_path, sizeof(pdf_path), NULL, NULL);
+
+        GtkPrintOperation *print = gtk_print_operation_new();
+        gtk_print_operation_set_export_filename(print, pdf_path);
+
+        g_signal_connect(print, "draw-page", G_CALLBACK(print_page), app);
+        g_signal_connect(print, "begin-print", G_CALLBACK(print_begin), app);
+
+        GError *error = NULL;
+        GtkPrintOperationResult result = gtk_print_operation_run(print,
+                                                                  GTK_PRINT_OPERATION_ACTION_EXPORT,
+                                                                  GTK_WINDOW(app->window),
+                                                                  &error);
+
+        if (result == GTK_PRINT_OPERATION_RESULT_ERROR) {
+            GtkWidget *error_dialog = gtk_message_dialog_new(GTK_WINDOW(app->window),
+                                                              GTK_DIALOG_MODAL,
+                                                              GTK_MESSAGE_ERROR,
+                                                              GTK_BUTTONS_OK,
+                                                              "%s%s",
+                                                              TR(app, "Erreur d'export PDF: ", "PDF export error: "),
+                                                              error->message);
+            gtk_dialog_run(GTK_DIALOG(error_dialog));
+            gtk_widget_destroy(error_dialog);
+            g_error_free(error);
+        } else {
+            GtkWidget *success_dialog = gtk_message_dialog_new(GTK_WINDOW(app->window),
+                                                                GTK_DIALOG_MODAL,
+                                                                GTK_MESSAGE_INFO,
+                                                                GTK_BUTTONS_OK,
+                                                                "%s\n%s",
+                                                                TR(app, "PDF exporté avec succès:", "PDF exported successfully:"),
+                                                                pdf_path);
+            gtk_dialog_run(GTK_DIALOG(success_dialog));
+            gtk_widget_destroy(success_dialog);
+        }
+
+        g_object_unref(print);
+    }
+#else
+    // Pour Linux, utiliser le dialogue GTK standard
+    GtkWidget *dialog = gtk_file_chooser_dialog_new(TR(app, "Exporter en PDF", "Export to PDF"),
+                                                      GTK_WINDOW(app->window),
+                                                      GTK_FILE_CHOOSER_ACTION_SAVE,
+                                                      TR(app, "_Annuler", "_Cancel"), GTK_RESPONSE_CANCEL,
+                                                      TR(app, "_Enregistrer", "_Save"), GTK_RESPONSE_ACCEPT,
+                                                      NULL);
+
+    gtk_file_chooser_set_do_overwrite_confirmation(GTK_FILE_CHOOSER(dialog), TRUE);
+    gtk_file_chooser_set_current_name(GTK_FILE_CHOOSER(dialog), "polar_diagram.pdf");
+
+    GtkFileFilter *filter = gtk_file_filter_new();
+    gtk_file_filter_set_name(filter, "PDF files");
+    gtk_file_filter_add_pattern(filter, "*.pdf");
+    gtk_file_chooser_add_filter(GTK_FILE_CHOOSER(dialog), filter);
+
+    if (gtk_dialog_run(GTK_DIALOG(dialog)) == GTK_RESPONSE_ACCEPT) {
+        char *pdf_path = gtk_file_chooser_get_filename(GTK_FILE_CHOOSER(dialog));
+
+        GtkPrintOperation *print = gtk_print_operation_new();
+        gtk_print_operation_set_export_filename(print, pdf_path);
+
+        g_signal_connect(print, "draw-page", G_CALLBACK(print_page), app);
+        g_signal_connect(print, "begin-print", G_CALLBACK(print_begin), app);
+
+        GError *error = NULL;
+        GtkPrintOperationResult result = gtk_print_operation_run(print,
+                                                                  GTK_PRINT_OPERATION_ACTION_EXPORT,
+                                                                  GTK_WINDOW(app->window),
+                                                                  &error);
+
+        if (result == GTK_PRINT_OPERATION_RESULT_ERROR) {
+            GtkWidget *error_dialog = gtk_message_dialog_new(GTK_WINDOW(app->window),
+                                                              GTK_DIALOG_MODAL,
+                                                              GTK_MESSAGE_ERROR,
+                                                              GTK_BUTTONS_OK,
+                                                              "%s%s",
+                                                              TR(app, "Erreur d'export PDF: ", "PDF export error: "),
+                                                              error->message);
+            gtk_dialog_run(GTK_DIALOG(error_dialog));
+            gtk_widget_destroy(error_dialog);
+            g_error_free(error);
+        }
+
+        g_free(pdf_path);
+        g_object_unref(print);
+    }
+
+    gtk_widget_destroy(dialog);
+#endif
 }
 
 // Fonction pour obtenir le facteur d'échelle (permet override par variable d'env)
@@ -3299,18 +3451,21 @@ void create_main_window(AppWidgets *app) {
     app->btn_create = gtk_button_new_with_label(TR(app, "Créer", "Create"));
     app->btn_update = gtk_button_new_with_label(TR(app, "Mettre à jour", "Update"));
     app->btn_print = gtk_button_new_with_label(TR(app, "Imprimer", "Print"));
+    app->btn_export_pdf = gtk_button_new_with_label(TR(app, "Export PDF", "Export PDF"));
 
     g_signal_connect(app->btn_open, "clicked", G_CALLBACK(on_open_clicked), app);
     g_signal_connect(app->btn_save, "clicked", G_CALLBACK(on_save_clicked), app);
     g_signal_connect(app->btn_create, "clicked", G_CALLBACK(on_create_clicked), app);
     g_signal_connect(app->btn_update, "clicked", G_CALLBACK(on_update_clicked), app);
     g_signal_connect(app->btn_print, "clicked", G_CALLBACK(on_print_clicked), app);
+    g_signal_connect(app->btn_export_pdf, "clicked", G_CALLBACK(on_export_pdf_clicked), app);
 
     gtk_box_pack_start(GTK_BOX(toolbar), app->btn_open, FALSE, FALSE, 0);
     gtk_box_pack_start(GTK_BOX(toolbar), app->btn_save, FALSE, FALSE, 0);
     gtk_box_pack_start(GTK_BOX(toolbar), app->btn_create, FALSE, FALSE, 0);
     gtk_box_pack_start(GTK_BOX(toolbar), app->btn_update, FALSE, FALSE, 0);
     gtk_box_pack_start(GTK_BOX(toolbar), app->btn_print, FALSE, FALSE, 0);
+    gtk_box_pack_start(GTK_BOX(toolbar), app->btn_export_pdf, FALSE, FALSE, 0);
 
     // Séparateur
     GtkWidget *separator = gtk_separator_new(GTK_ORIENTATION_VERTICAL);
