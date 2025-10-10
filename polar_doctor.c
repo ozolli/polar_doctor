@@ -21,10 +21,8 @@
 #define GTK_FILE_CHOOSER_NATIVE_DISABLED 1
 // Facteurs d'échelle pour l'impression sous Windows
 #define WINDOWS_PRINT_SCALE 1.5  // Facteur d'échelle global
-#define WINDOWS_FONT_SCALE 1.3   // Facteur pour les polices uniquement
 #else
 #define WINDOWS_PRINT_SCALE 1.0
-#define WINDOWS_FONT_SCALE 1.0
 #endif
 
 #define MAX_ANGLES 37    // 0° à 180° par pas de 5°
@@ -2036,13 +2034,10 @@ static double get_print_scale(void) {
     return WINDOWS_PRINT_SCALE;
 }
 
-// Fonction helper pour définir la taille de police avec correction Windows
+// Fonction helper pour définir la taille de police
+// Note: Sous Windows, cairo_scale() appliqué globalement gère le scaling
 static void set_print_font_size(cairo_t *cr, double size) {
-#ifdef _WIN32
-    cairo_set_font_size(cr, size * WINDOWS_FONT_SCALE);
-#else
     cairo_set_font_size(cr, size);
-#endif
 }
 
 void print_begin(GtkPrintOperation *operation, GtkPrintContext *context, gpointer user_data) {
