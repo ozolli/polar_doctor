@@ -2075,6 +2075,16 @@ void print_page(GtkPrintOperation *operation, GtkPrintContext *context, gint pag
         fprintf(log, "Scaling applied: YES\n");
 
         fclose(log);
+
+        // Afficher aussi dans la console
+        g_print("polar_doctor_print.log créé avec succès\n");
+    } else {
+        // Si l'ouverture échoue, afficher dans la console
+        g_print("ERREUR: Impossible de créer polar_doctor_print.log\n");
+
+        // Appliquer quand même le scaling
+        double scale = get_print_scale();
+        cairo_scale(cr, scale, scale);
     }
 #endif
 

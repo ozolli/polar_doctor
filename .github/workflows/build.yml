@@ -82,7 +82,7 @@ jobs:
       run: |
         gcc -o polar_doctor.exe polar_doctor.c \
           `pkg-config --cflags --libs gtk+-3.0` \
-          -lm -lsqlite3 -mwindows -Wall -O2
+          -lm -lsqlite3 -mwindows -D_WIN32 -Wall -O2
 
     - name: Create portable package
       run: |
