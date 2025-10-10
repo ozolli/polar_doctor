@@ -174,9 +174,7 @@ jobs:
     - name: Create Windows zip
       run: |
         mkdir -p artifacts
-        cd polar_doctor_win
-        zip -r ../artifacts/polar_doctor-windows-x64.zip .
-        cd ..
+        zip -r artifacts/polar_doctor-windows-x64.zip polar_doctor_win/
 
     - name: Generate checksums
       run: |
