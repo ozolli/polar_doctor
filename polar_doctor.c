@@ -2234,8 +2234,13 @@ void print_page(GtkPrintOperation *operation, GtkPrintContext *context, gint pag
     // Extraire le nom du fichier sans chemin et sans extension .pol
     char title[256];
     if (strlen(data->filename) > 0) {
-        const char *basename = strrchr(data->filename, '/');
-        basename = basename ? basename + 1 : data->filename;
+        // Trouver le dernier slash ou backslash (Windows/Linux)
+        const char *last_slash = strrchr(data->filename, '/');
+        const char *last_backslash = strrchr(data->filename, '\\');
+        const char *basename = data->filename;
+        if (last_slash) basename = last_slash + 1;
+        if (last_backslash && last_backslash > basename) basename = last_backslash + 1;
+
         strncpy(title, basename, sizeof(title) - 1);
         title[sizeof(title) - 1] = '\0';
 
