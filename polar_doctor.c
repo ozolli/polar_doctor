@@ -14,14 +14,23 @@
 #include <ctype.h>
 #include <stdbool.h>
 #include <sqlite3.h>
+#include <limits.h>
 
 // Configuration spécifique Windows pour les dialogues de fichiers
 #ifdef _WIN32
 #include <windows.h>
 #define GTK_FILE_CHOOSER_NATIVE_DISABLED 1
-// Facteurs d'échelle pour l'impression sous Windows
-#define WINDOWS_PRINT_SCALE 1.5  // Facteur d'échelle global
+// Facteur d'échelle pour le texte dans l'export PDF Windows
+#define WINDOWS_PRINT_SCALE 0.5  // Réduction de 50% du texte
 #else
+// Définir MAX_PATH pour Linux si non défini
+#ifndef MAX_PATH
+#ifdef PATH_MAX
+#define MAX_PATH PATH_MAX
+#else
+#define MAX_PATH 4096
+#endif
+#endif
 #define WINDOWS_PRINT_SCALE 1.0
 #endif
 
@@ -95,7 +104,6 @@ typedef struct {
     GtkWidget *btn_save;
     GtkWidget *btn_create;
     GtkWidget *btn_update;
-    GtkWidget *btn_print;
     GtkWidget *btn_export_pdf;
     GtkWidget *btn_add_twa;
     GtkWidget *btn_add_tws;
@@ -141,7 +149,6 @@ void rebuild_vmg_table(AppWidgets *app);
 void on_tws_changed(GtkWidget *widget, gpointer user_data);
 void on_cell_changed(GtkEntry *entry, gpointer user_data);
 gboolean prompt_save_changes(AppWidgets *app);
-void on_print_clicked(GtkWidget *widget, gpointer user_data);
 void on_export_pdf_clicked(GtkWidget *widget, gpointer user_data);
 void print_begin(GtkPrintOperation *operation, GtkPrintContext *context, gpointer user_data);
 void print_page(GtkPrintOperation *operation, GtkPrintContext *context, gint page_nr, gpointer user_data);
@@ -1993,78 +2000,40 @@ void on_save_clicked(GtkWidget *widget, gpointer user_data) {
     }
 }
 
-void on_print_clicked(GtkWidget *widget, gpointer user_data) {
-    AppWidgets *app = (AppWidgets *)user_data;
-
-#ifdef _WIN32
-    // Log de debug au début de l'impression
-    FILE *log = fopen("polar_doctor_print.log", "w");
-    if (log) {
-        fprintf(log, "Windows Print Debug\n");
-        fprintf(log, "===================\n");
-        fprintf(log, "Print operation starting...\n");
-        fclose(log);
-    }
-#endif
-
-    GtkPrintOperation *print = gtk_print_operation_new();
-
-    // Callback pour dessiner la page
-    g_signal_connect(print, "draw-page", G_CALLBACK(print_page), app);
-    g_signal_connect(print, "begin-print", G_CALLBACK(print_begin), app);
-
-    GError *error = NULL;
-    GtkPrintOperationResult result = gtk_print_operation_run(print,
-                                                              GTK_PRINT_OPERATION_ACTION_PRINT_DIALOG,
-                                                              GTK_WINDOW(app->window),
-                                                              &error);
-
-    if (result == GTK_PRINT_OPERATION_RESULT_ERROR) {
-#ifdef _WIN32
-        // Ajouter détails de l'erreur au log
-        FILE *log2 = fopen("polar_doctor_print.log", "a");
-        if (log2) {
-            fprintf(log2, "\nERROR: %s\n", error->message);
-            fprintf(log2, "\nSolution: Utilisez 'Exporter PDF' depuis le menu Fichier\n");
-            fprintf(log2, "ou sélectionnez 'Microsoft Print to PDF' dans le dialogue d'impression.\n");
-            fclose(log2);
-        }
-#endif
-        GtkWidget *error_dialog = gtk_message_dialog_new(GTK_WINDOW(app->window),
-                                                          GTK_DIALOG_MODAL,
-                                                          GTK_MESSAGE_ERROR,
-                                                          GTK_BUTTONS_OK,
-                                                          "%s%s\n\n%s",
-                                                          TR(app, "Erreur d'impression: ", "Print error: "),
-                                                          error->message,
-                                                          TR(app, "Conseil: Utilisez 'Exporter PDF' ou sélectionnez 'Microsoft Print to PDF' dans le dialogue.",
-                                                             "Tip: Use 'Export PDF' or select 'Microsoft Print to PDF' in the dialog."));
-        gtk_dialog_run(GTK_DIALOG(error_dialog));
-        gtk_widget_destroy(error_dialog);
-        g_error_free(error);
-    }
-#ifdef _WIN32
-    else {
-        // Succès - ajouter au log
-        FILE *log3 = fopen("polar_doctor_print.log", "a");
-        if (log3) {
-            fprintf(log3, "Print operation completed successfully\n");
-            fclose(log3);
-        }
-    }
-#endif
-
-    g_object_unref(print);
-}
-
-// Fonction pour exporter en PDF (alternative à l'impression pour Windows)
+// Fonction pour exporter en PDF
 void on_export_pdf_clicked(GtkWidget *widget, gpointer user_data) {
     AppWidgets *app = (AppWidgets *)user_data;
 
 #ifdef _WIN32
     // Utiliser le dialogue natif Windows pour sauvegarder
     OPENFILENAMEW ofn;
-    wchar_t filename[MAX_PATH] = L"polar_diagram.pdf";
+    wchar_t filename[MAX_PATH];
+
+    // Extraire le nom de base du fichier polaire (sans chemin ni extension)
+    char base_name[256] = "polar_diagram";
+    if (app->polar_data && app->polar_data->filename[0] != '\0') {
+        // Trouver le dernier slash ou backslash
+        const char *last_slash = strrchr(app->polar_data->filename, '/');
+        const char *last_backslash = strrchr(app->polar_data->filename, '\\');
+        const char *base = app->polar_data->filename;
+        if (last_slash) base = last_slash + 1;
+        if (last_backslash && last_backslash > base) base = last_backslash + 1;
+
+        // Copier le nom de base
+        strncpy(base_name, base, sizeof(base_name) - 1);
+        base_name[sizeof(base_name) - 1] = '\0';
+
+        // Enlever l'extension .pol si présente
+        char *dot = strrchr(base_name, '.');
+        if (dot && (strcmp(dot, ".pol") == 0 || strcmp(dot, ".POL") == 0)) {
+            *dot = '\0';
+        }
+    }
+
+    // Ajouter .pdf et convertir en wchar_t
+    char pdf_name[MAX_PATH];
+    snprintf(pdf_name, sizeof(pdf_name), "%s.pdf", base_name);
+    MultiByteToWideChar(CP_UTF8, 0, pdf_name, -1, filename, MAX_PATH);
 
     ZeroMemory(&ofn, sizeof(ofn));
     ofn.lStructSize = sizeof(ofn);
@@ -2085,6 +2054,10 @@ void on_export_pdf_clicked(GtkWidget *widget, gpointer user_data) {
         WideCharToMultiByte(CP_UTF8, 0, filename, -1, pdf_path, sizeof(pdf_path), NULL, NULL);
 
         GtkPrintOperation *print = gtk_print_operation_new();
+
+        // Définir le titre du document (juste le nom de base, sans chemin)
+        gtk_print_operation_set_job_name(print, base_name);
+
         gtk_print_operation_set_export_filename(print, pdf_path);
 
         g_signal_connect(print, "draw-page", G_CALLBACK(print_page), app);
@@ -2123,6 +2096,32 @@ void on_export_pdf_clicked(GtkWidget *widget, gpointer user_data) {
     }
 #else
     // Pour Linux, utiliser le dialogue GTK standard
+
+    // Extraire le nom de base du fichier polaire (sans chemin ni extension)
+    char base_name[256] = "polar_diagram";
+    if (app->polar_data && app->polar_data->filename[0] != '\0') {
+        // Trouver le dernier slash ou backslash
+        const char *last_slash = strrchr(app->polar_data->filename, '/');
+        const char *last_backslash = strrchr(app->polar_data->filename, '\\');
+        const char *base = app->polar_data->filename;
+        if (last_slash) base = last_slash + 1;
+        if (last_backslash && last_backslash > base) base = last_backslash + 1;
+
+        // Copier le nom de base
+        strncpy(base_name, base, sizeof(base_name) - 1);
+        base_name[sizeof(base_name) - 1] = '\0';
+
+        // Enlever l'extension .pol si présente
+        char *dot = strrchr(base_name, '.');
+        if (dot && (strcmp(dot, ".pol") == 0 || strcmp(dot, ".POL") == 0)) {
+            *dot = '\0';
+        }
+    }
+
+    // Nom du fichier PDF par défaut
+    char pdf_default_name[MAX_PATH];
+    snprintf(pdf_default_name, sizeof(pdf_default_name), "%s.pdf", base_name);
+
     GtkWidget *dialog = gtk_file_chooser_dialog_new(TR(app, "Exporter en PDF", "Export to PDF"),
                                                       GTK_WINDOW(app->window),
                                                       GTK_FILE_CHOOSER_ACTION_SAVE,
@@ -2131,7 +2130,7 @@ void on_export_pdf_clicked(GtkWidget *widget, gpointer user_data) {
                                                       NULL);
 
     gtk_file_chooser_set_do_overwrite_confirmation(GTK_FILE_CHOOSER(dialog), TRUE);
-    gtk_file_chooser_set_current_name(GTK_FILE_CHOOSER(dialog), "polar_diagram.pdf");
+    gtk_file_chooser_set_current_name(GTK_FILE_CHOOSER(dialog), pdf_default_name);
 
     GtkFileFilter *filter = gtk_file_filter_new();
     gtk_file_filter_set_name(filter, "PDF files");
@@ -2142,6 +2141,10 @@ void on_export_pdf_clicked(GtkWidget *widget, gpointer user_data) {
         char *pdf_path = gtk_file_chooser_get_filename(GTK_FILE_CHOOSER(dialog));
 
         GtkPrintOperation *print = gtk_print_operation_new();
+
+        // Définir le titre du document (juste le nom de base, sans chemin)
+        gtk_print_operation_set_job_name(print, base_name);
+
         gtk_print_operation_set_export_filename(print, pdf_path);
 
         g_signal_connect(print, "draw-page", G_CALLBACK(print_page), app);
@@ -2174,6 +2177,7 @@ void on_export_pdf_clicked(GtkWidget *widget, gpointer user_data) {
 #endif
 }
 
+#ifdef _WIN32
 // Fonction pour obtenir le facteur d'échelle (permet override par variable d'env)
 static double get_print_scale(void) {
     const char *scale_env = getenv("POLAR_PRINT_SCALE");
@@ -2185,6 +2189,7 @@ static double get_print_scale(void) {
     }
     return WINDOWS_PRINT_SCALE;
 }
+#endif
 
 // Fonction helper pour définir la taille de police avec scaling Windows
 // Applique uniquement aux polices (pas au diagramme/layout)
@@ -2205,33 +2210,6 @@ void print_page(GtkPrintOperation *operation, GtkPrintContext *context, gint pag
     AppWidgets *app = (AppWidgets *)user_data;
     PolarData *data = app->polar_data;
     cairo_t *cr = gtk_print_context_get_cairo_context(context);
-
-    // Log de debug Windows
-#ifdef _WIN32
-    gdouble dpi_x = gtk_print_context_get_dpi_x(context);
-    gdouble dpi_y = gtk_print_context_get_dpi_y(context);
-
-    // Log de debug dans un fichier
-    FILE *log = fopen("polar_doctor_print.log", "w");
-    if (log) {
-        fprintf(log, "Windows Print Debug\n");
-        fprintf(log, "===================\n");
-        fprintf(log, "DPI X: %.2f\n", dpi_x);
-        fprintf(log, "DPI Y: %.2f\n", dpi_y);
-
-        double scale = get_print_scale();
-        fprintf(log, "Font scale factor: %.2f\n", scale);
-        fprintf(log, "Note: Scaling applied only to fonts, not diagram\n");
-
-        fclose(log);
-
-        // Afficher aussi dans la console
-        g_print("polar_doctor_print.log créé avec succès\n");
-    } else {
-        // Si l'ouverture échoue, afficher dans la console
-        g_print("ERREUR: Impossible de créer polar_doctor_print.log\n");
-    }
-#endif
 
     double width = gtk_print_context_get_width(context);
     double height = gtk_print_context_get_height(context);
@@ -3450,21 +3428,18 @@ void create_main_window(AppWidgets *app) {
     app->btn_save = gtk_button_new_with_label(TR(app, "Enregistrer", "Save"));
     app->btn_create = gtk_button_new_with_label(TR(app, "Créer", "Create"));
     app->btn_update = gtk_button_new_with_label(TR(app, "Mettre à jour", "Update"));
-    app->btn_print = gtk_button_new_with_label(TR(app, "Imprimer", "Print"));
     app->btn_export_pdf = gtk_button_new_with_label(TR(app, "Export PDF", "Export PDF"));
 
     g_signal_connect(app->btn_open, "clicked", G_CALLBACK(on_open_clicked), app);
     g_signal_connect(app->btn_save, "clicked", G_CALLBACK(on_save_clicked), app);
     g_signal_connect(app->btn_create, "clicked", G_CALLBACK(on_create_clicked), app);
     g_signal_connect(app->btn_update, "clicked", G_CALLBACK(on_update_clicked), app);
-    g_signal_connect(app->btn_print, "clicked", G_CALLBACK(on_print_clicked), app);
     g_signal_connect(app->btn_export_pdf, "clicked", G_CALLBACK(on_export_pdf_clicked), app);
 
     gtk_box_pack_start(GTK_BOX(toolbar), app->btn_open, FALSE, FALSE, 0);
     gtk_box_pack_start(GTK_BOX(toolbar), app->btn_save, FALSE, FALSE, 0);
     gtk_box_pack_start(GTK_BOX(toolbar), app->btn_create, FALSE, FALSE, 0);
     gtk_box_pack_start(GTK_BOX(toolbar), app->btn_update, FALSE, FALSE, 0);
-    gtk_box_pack_start(GTK_BOX(toolbar), app->btn_print, FALSE, FALSE, 0);
     gtk_box_pack_start(GTK_BOX(toolbar), app->btn_export_pdf, FALSE, FALSE, 0);
 
     // Séparateur
@@ -3557,7 +3532,7 @@ void update_interface_language(AppWidgets *app) {
     gtk_button_set_label(GTK_BUTTON(app->btn_save), TR(app, "Enregistrer", "Save"));
     gtk_button_set_label(GTK_BUTTON(app->btn_create), TR(app, "Créer", "Create"));
     gtk_button_set_label(GTK_BUTTON(app->btn_update), TR(app, "Mettre à jour", "Update"));
-    gtk_button_set_label(GTK_BUTTON(app->btn_print), TR(app, "Imprimer", "Print"));
+    gtk_button_set_label(GTK_BUTTON(app->btn_export_pdf), TR(app, "Export PDF", "Export PDF"));
     gtk_button_set_label(GTK_BUTTON(app->btn_add_twa), TR(app, "Ajout TWA", "Add TWA"));
     gtk_button_set_label(GTK_BUTTON(app->btn_add_tws), TR(app, "Ajout TWS", "Add TWS"));
     gtk_button_set_label(GTK_BUTTON(app->btn_delete), TR(app, "Suppression", "Delete"));
