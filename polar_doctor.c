@@ -21,7 +21,7 @@
 #include <windows.h>
 #define GTK_FILE_CHOOSER_NATIVE_DISABLED 1
 // Facteur d'échelle pour le texte dans l'export PDF Windows
-#define WINDOWS_PRINT_SCALE 0.5  // Réduction de 50% du texte
+#define WINDOWS_PRINT_SCALE 1.0  // Taille normale (ajustable avec POLAR_PRINT_SCALE)
 #else
 // Définir MAX_PATH pour Linux si non défini
 #ifndef MAX_PATH

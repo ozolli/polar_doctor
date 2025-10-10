@@ -73,3 +73,8 @@ gtk-win/
 # Core dumps
 core
 core.*
+
+# Doc interne
+GITHUB_ACTIONS.md
+CLAUDE.md
+.claude/
