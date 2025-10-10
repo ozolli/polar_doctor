@@ -93,23 +93,19 @@ jobs:
         cp README.md polar_doctor_win/
         cp BUILD.md polar_doctor_win/
 
-        # Copy all required DLLs iteratively
-        # First pass: copy direct dependencies
+        # Copy all required DLLs with multiple passes
+        echo "Copying DLLs - Pass 1 (from exe)"
         ldd polar_doctor.exe | grep mingw64 | awk '{print $3}' | xargs -I {} cp {} polar_doctor_win/ 2>/dev/null || true
 
-        # Multiple passes to get transitive dependencies
-        for i in {1..5}; do
-          echo "DLL copy pass $i"
-          for dll in polar_doctor_win/*.dll; do
-            if [ -f "$dll" ]; then
-              ldd "$dll" 2>/dev/null | grep mingw64 | awk '{print $3}' | while read dep; do
-                if [ -f "$dep" ] && [ ! -f "polar_doctor_win/$(basename "$dep")" ]; then
-                  cp "$dep" polar_doctor_win/ 2>/dev/null || true
-                fi
-              done
-            fi
-          done
-        done
+        # Additional passes to catch transitive dependencies
+        echo "Copying DLLs - Pass 2"
+        for dll in polar_doctor_win/*.dll; do [ -f "$dll" ] && ldd "$dll" 2>/dev/null | grep mingw64 | awk '{print $3}' | xargs -I {} cp {} polar_doctor_win/ 2>/dev/null || true; done
+
+        echo "Copying DLLs - Pass 3"
+        for dll in polar_doctor_win/*.dll; do [ -f "$dll" ] && ldd "$dll" 2>/dev/null | grep mingw64 | awk '{print $3}' | xargs -I {} cp {} polar_doctor_win/ 2>/dev/null || true; done
+
+        echo "Copying DLLs - Pass 4"
+        for dll in polar_doctor_win/*.dll; do [ -f "$dll" ] && ldd "$dll" 2>/dev/null | grep mingw64 | awk '{print $3}' | xargs -I {} cp {} polar_doctor_win/ 2>/dev/null || true; done
 
         # Copy GTK runtime files
         mkdir -p polar_doctor_win/share/glib-2.0
