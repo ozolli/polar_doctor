@@ -75,7 +75,7 @@ polar_doctor
 Téléchargez depuis [GitHub Releases](https://github.com/ozolli/polar_doctor/releases) :
 - 🐧 **Linux x86_64** (PC standard)
 - 🐧 **Linux ARM64** (Raspberry Pi, serveurs ARM)
-- 🍎 **macOS x64** (Intel/Apple Silicon avec Rosetta)
+- 🍎 **macOS universel** (Intel + Apple Silicon, binaire fat)
 - 🪟 **Windows x64** (package portable avec DLLs)
 
 ### Compilation depuis les sources

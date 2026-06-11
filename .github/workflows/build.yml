@@ -117,52 +117,93 @@ jobs:
         path: dist/polar_doctor-linux-arm64.tar.gz
         retention-days: 30
 
-  build-macos:
-    name: Build on macOS
-    runs-on: macos-latest
-    # brew install gtk+3 peut être long/fragile : borné et non bloquant pour la release.
+  # macOS : GTK Homebrew n'est pas universel, donc on compile chaque tranche sur son
+  # runner (Intel macos-13, Apple Silicon macos-14) puis on fusionne avec lipo.
+  build-macos-x64:
+    name: Build on macOS (x86_64)
+    runs-on: macos-13
     timeout-minutes: 40
     continue-on-error: true
-
     steps:
     - name: Checkout code
       uses: actions/checkout@v4
-
     - name: Install dependencies
+      run: brew install gtk+3 sqlite pkg-config
+    - name: Build (x86_64)
       run: |
-        brew install gtk+3 sqlite pkg-config
-
-    - name: Build
-      run: |
-        gcc -o polar_doctor polar_doctor.c \
+        gcc -arch x86_64 -o polar_doctor-x86_64 polar_doctor.c \
           `pkg-config --cflags --libs gtk+-3.0` \
           -lm -lsqlite3 -Wall -O2
+        file polar_doctor-x86_64
+    - name: Upload slice
+      uses: actions/upload-artifact@v4
+      with:
+        name: macos-slice-x86_64
+        path: polar_doctor-x86_64
+        retention-days: 1
 
-    - name: Set executable permissions
-      run: chmod +x polar_doctor
-
-    - name: Test binary
+  build-macos-arm64:
+    name: Build on macOS (arm64)
+    runs-on: macos-14
+    timeout-minutes: 40
+    continue-on-error: true
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+    - name: Install dependencies
+      run: brew install gtk+3 sqlite pkg-config
+    - name: Build (arm64)
       run: |
-        # Ne pas exécuter : appli GUI sans flag --version, gtk_main() bloque
-        # (sur macOS le backend quartz ne sort pas faute de display -> hang).
-        file polar_doctor
-        test -x polar_doctor
+        gcc -arch arm64 -o polar_doctor-arm64 polar_doctor.c \
+          `pkg-config --cflags --libs gtk+-3.0` \
+          -lm -lsqlite3 -Wall -O2
+        file polar_doctor-arm64
+    - name: Upload slice
+      uses: actions/upload-artifact@v4
+      with:
+        name: macos-slice-arm64
+        path: polar_doctor-arm64
+        retention-days: 1
 
+  build-macos:
+    name: macOS universal package
+    runs-on: macos-latest
+    needs: [build-macos-x64, build-macos-arm64]
+    timeout-minutes: 15
+    continue-on-error: true
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+    - name: Download x86_64 slice
+      uses: actions/download-artifact@v4
+      with:
+        name: macos-slice-x86_64
+        path: .
+    - name: Download arm64 slice
+      uses: actions/download-artifact@v4
+      with:
+        name: macos-slice-arm64
+        path: .
+    - name: Create universal binary (lipo)
+      run: |
+        lipo -create polar_doctor-x86_64 polar_doctor-arm64 -output polar_doctor
+        chmod +x polar_doctor
+        file polar_doctor
+        lipo -info polar_doctor
     - name: Create package
       run: |
         mkdir -p dist
-        tar -czf dist/polar_doctor-macos-x64.tar.gz \
+        tar -czf dist/polar_doctor-macos-universal.tar.gz \
           polar_doctor \
           polar_doctor.png \
           polar_doctor.svg \
           README.md \
           BUILD.md
-
     - name: Upload artifact
       uses: actions/upload-artifact@v4
       with:
-        name: polar_doctor-macos-x64
-        path: dist/polar_doctor-macos-x64.tar.gz
+        name: polar_doctor-macos-universal
+        path: dist/polar_doctor-macos-universal.tar.gz
         retention-days: 30
 
   build-windows:
@@ -282,7 +323,7 @@ jobs:
       uses: actions/download-artifact@v4
       continue-on-error: true  # macOS peut avoir échoué/timeout : ne bloque pas la release
       with:
-        name: polar_doctor-macos-x64
+        name: polar_doctor-macos-universal
         path: ./artifacts
 
     - name: Download Windows artifact
@@ -301,7 +342,7 @@ jobs:
         cd artifacts
         # Ne checksummer que les artefacts réellement présents (ARM64 peut manquer)
         for f in polar_doctor-linux-x64.tar.gz polar_doctor-linux-arm64.tar.gz \
-                 polar_doctor-macos-x64.tar.gz polar_doctor-windows-x64.zip; do
+                 polar_doctor-macos-universal.tar.gz polar_doctor-windows-x64.zip; do
           [ -f "$f" ] && sha256sum "$f" > "$f.sha256"
         done
         sha256sum *.tar.gz *.zip 2>/dev/null > SHA256SUMS.txt || true
@@ -315,8 +356,8 @@ jobs:
           artifacts/polar_doctor-linux-x64.tar.gz.sha256
           artifacts/polar_doctor-linux-arm64.tar.gz
           artifacts/polar_doctor-linux-arm64.tar.gz.sha256
-          artifacts/polar_doctor-macos-x64.tar.gz
-          artifacts/polar_doctor-macos-x64.tar.gz.sha256
+          artifacts/polar_doctor-macos-universal.tar.gz
+          artifacts/polar_doctor-macos-universal.tar.gz.sha256
           artifacts/polar_doctor-windows-x64.zip
           artifacts/polar_doctor-windows-x64.zip.sha256
           artifacts/SHA256SUMS.txt
@@ -337,9 +378,9 @@ jobs:
           ./polar_doctor
           ```
 
-          ### macOS
+          ### macOS (universel : Intel + Apple Silicon)
           ```bash
-          tar -xzf polar_doctor-macos-x64.tar.gz
+          tar -xzf polar_doctor-macos-universal.tar.gz
           ./polar_doctor
           ```
 
@@ -355,7 +396,7 @@ jobs:
           ```bash
           sha256sum -c polar_doctor-linux-x64.tar.gz.sha256
           sha256sum -c polar_doctor-linux-arm64.tar.gz.sha256
-          sha256sum -c polar_doctor-macos-x64.tar.gz.sha256
+          sha256sum -c polar_doctor-macos-universal.tar.gz.sha256
           sha256sum -c polar_doctor-windows-x64.zip.sha256
           ```
 
