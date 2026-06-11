@@ -10,7 +10,7 @@ This is a C-based sailboat polar diagram generator that processes sailing perfor
 
 ```bash
 # Compile
-gcc -o polar_generator polar_generator.c -lm -lsqlite3
+gcc -o polar_doctor *.c -lm -lsqlite3 `pkg-config --cflags --libs gtk+-3.0`
 
 # Basic usage - create new polar
 ./polar_generator -o polar.pol input.nmea
@@ -24,6 +24,25 @@ gcc -o polar_generator polar_generator.c -lm -lsqlite3
 # Verbose mode
 ./polar_generator -v -o polar.pol input.nmea
 ```
+
+## Source Layout
+
+The code is split into modules sharing one header (`polar_doctor.h` — types, constants,
+globals, prototypes). All `.c` are compiled together (`gcc *.c` / `make`).
+
+- `boat_config.c` — boat inventory (sails/sea states), INI load/save
+- `import.c` — NMEA + VDR parsing, engine/STW-SOG filtering, percentile aggregation, grid
+- `polar_data.c` — `PolarData` model: .pol load/save, interpolation, VMG, color palette
+- `diagram.c` — polar diagram drawing + dynamic mode + mouse events
+- `gui_tabs.c` — data/diagram tabs, VMG table, legend, open/save
+- `gui_window.c` — main window, toolbar, create/update, editing, language, Help/Boat dialogs
+- `export_pdf.c` — PDF export/printing
+- `win32_dialogs.c` — native Windows file dialogs (empty on non-Windows)
+- `main.c` — entry point + global definitions
+
+**Unit tests**: `#include "polar_doctor.h"` and link the needed module `.c` files (not `main.c`),
+e.g. `gcc -I. test.c import.c polar_data.c $(pkg-config --cflags --libs gtk+-3.0) -lm -lsqlite3`.
+(The former single-file `#define main … #include "polar_doctor.c"` trick is no longer used.)
 
 ## Architecture
 

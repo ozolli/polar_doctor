@@ -31,7 +31,7 @@ sudo pacman -S base-devel gtk3 sqlite
 
 ### Compilation
 ```bash
-gcc -o polar_doctor polar_doctor.c \
+gcc -o polar_doctor *.c \
     `pkg-config --cflags --libs gtk+-3.0` \
     -lm -lsqlite3
 ```
@@ -70,7 +70,7 @@ pacman -S mingw-w64-x86_64-gcc \
 
 **Compilation :**
 ```bash
-gcc -o polar_doctor.exe polar_doctor.c \
+gcc -o polar_doctor.exe *.c \
     `pkg-config --cflags --libs gtk+-3.0` \
     -lm -lsqlite3 \
     -mwindows
@@ -107,7 +107,7 @@ vcpkg integrate install
 
 **Compilation :**
 ```cmd
-cl /Fe:polar_doctor.exe polar_doctor.c ^
+cl /Fe:polar_doctor.exe *.c ^
    /I"C:\vcpkg\installed\x64-windows\include" ^
    /link /LIBPATH:"C:\vcpkg\installed\x64-windows\lib" ^
    gtk-3.lib sqlite3.lib
@@ -123,7 +123,7 @@ sudo apt-get install mingw-w64
 # Depuis https://www.gtk.org/docs/installations/windows/
 
 # Compiler
-x86_64-w64-mingw32-gcc -o polar_doctor.exe polar_doctor.c \
+x86_64-w64-mingw32-gcc -o polar_doctor.exe *.c \
     -I/path/to/gtk-win/include \
     -L/path/to/gtk-win/lib \
     -lgtk-3 -lgdk-3 -lglib-2.0 -lsqlite3 \
@@ -146,7 +146,7 @@ brew install gtk+3 sqlite3 pkg-config
 
 ### Compilation
 ```bash
-gcc -o polar_doctor polar_doctor.c \
+gcc -o polar_doctor *.c \
     `pkg-config --cflags --libs gtk+-3.0` \
     -lsqlite3
 ```
@@ -200,12 +200,12 @@ RUN apt-get update && apt-get install -y \
     pkg-config
 
 # Copier les sources
-COPY polar_doctor.c /app/
+COPY *.c *.h /app/
 COPY polar_doctor.png /app/
 WORKDIR /app
 
 # Compiler
-RUN gcc -o polar_doctor polar_doctor.c \
+RUN gcc -o polar_doctor *.c \
     `pkg-config --cflags --libs gtk+-3.0` \
     -lm -lsqlite3
 
@@ -234,7 +234,8 @@ UNAME_S := $(shell uname -s)
 # Variables communes
 CC = gcc
 TARGET = polar_doctor
-SRC = polar_doctor.c
+SRC = $(wildcard *.c)
+HDR = $(wildcard *.h)
 LIBS = -lm -lsqlite3
 
 # Configuration selon la plateforme
@@ -305,8 +306,9 @@ link_directories(${GTK3_LIBRARY_DIRS})
 # Définir les flags
 add_definitions(${GTK3_CFLAGS_OTHER})
 
-# Créer l'exécutable
-add_executable(polar_doctor polar_doctor.c)
+# Créer l'exécutable (tous les modules .c)
+file(GLOB SOURCES "*.c")
+add_executable(polar_doctor ${SOURCES})
 
 # Lier les bibliothèques
 target_link_libraries(polar_doctor
@@ -336,9 +338,9 @@ sudo make install
 
 | Plateforme | Commande rapide |
 |------------|-----------------|
-| **Linux** | `gcc -o polar_doctor polar_doctor.c $(pkg-config --cflags --libs gtk+-3.0) -lm -lsqlite3` |
-| **Windows (MSYS2)** | `gcc -o polar_doctor.exe polar_doctor.c $(pkg-config --cflags --libs gtk+-3.0) -lm -lsqlite3 -mwindows` |
-| **macOS** | `gcc -o polar_doctor polar_doctor.c $(pkg-config --cflags --libs gtk+-3.0) -lsqlite3` |
+| **Linux** | `gcc -o polar_doctor *.c $(pkg-config --cflags --libs gtk+-3.0) -lm -lsqlite3` |
+| **Windows (MSYS2)** | `gcc -o polar_doctor.exe *.c $(pkg-config --cflags --libs gtk+-3.0) -lm -lsqlite3 -mwindows` |
+| **macOS** | `gcc -o polar_doctor *.c $(pkg-config --cflags --libs gtk+-3.0) -lsqlite3` |
 
 ---
 

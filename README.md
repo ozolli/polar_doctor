@@ -211,7 +211,7 @@ TWA\TWS;6;8;10;12;14
 ### Commande simple
 
 ```bash
-gcc -o polar_doctor polar_doctor.c \
+gcc -o polar_doctor *.c \
     `pkg-config --cflags --libs gtk+-3.0` \
     -lm -lsqlite3
 ```
@@ -234,26 +234,20 @@ make help         # Aide
 
 ## 🔧 Architecture
 
+Code découpé en modules (un header commun + compilation de tous les `.c`) :
+
 ```
-polar_doctor.c           # Code source principal (130+ KB)
-├── Structures de données
-│   ├── PolarData       # Grille polaire
-│   ├── polar_grid_t    # Buckets de mesures
-│   └── AppWidgets      # Interface GTK
-├── Moteur de calcul
-│   ├── NMEA parser     # Sentences (champs préservés) + SOG (RMC/VTG/VBW/RMA/OSD)
-│   ├── VDR reader      # SQLite + filtre moteur (RPM/Charge)
-│   ├── Débruitage      # Lissage STW + comparaison SOG
-│   ├── Agrégation      # Percentile (P90)
-│   └── VMG calculator  # Angles optimaux
-├── Interface GTK
-│   ├── Éditeur tableau
-│   ├── Diagramme polaire
-│   ├── Tableau VMG
-│   └── Export PDF
-└── I18N
-    ├── Français
-    └── English
+polar_doctor.h     # Déclarations communes : types, constantes, globals, prototypes
+boat_config.c      # Config bateau : inventaire voiles/mer, lecture/écriture INI
+import.c           # NMEA (champs préservés + SOG RMC/VTG/VBW/RMA/OSD) + VDR
+                   #   (filtre moteur RPM/Charge, débruitage STW/SOG) + agrégation P90
+polar_data.c       # Modèle PolarData : .pol load/save, interpolation, VMG, palette
+diagram.c          # Dessin du diagramme polaire + mode dynamique + événements
+gui_tabs.c         # Onglets Données/Diagramme, table VMG, légende, ouverture/sauvegarde
+gui_window.c       # Fenêtre, toolbar, création/MAJ, édition, langue, dialogues Aide/Bateau
+export_pdf.c       # Export / impression PDF
+win32_dialogs.c    # Dialogues de fichiers natifs Windows (vide hors Windows)
+main.c             # Point d'entrée + globals
 ```
 
 ## 🧪 Tests

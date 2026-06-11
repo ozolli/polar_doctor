@@ -6,7 +6,8 @@ UNAME_S := $(shell uname -s)
 # Variables communes
 CC = gcc
 TARGET = polar_doctor
-SRC = polar_doctor.c
+SRC = $(wildcard *.c)
+HDR = $(wildcard *.h)
 LIBS = -lm -lsqlite3
 CFLAGS_COMMON = -Wall -O2
 
@@ -39,7 +40,7 @@ all: $(TARGET)
 	@echo "✓ Compilation terminée pour $(PLATFORM)"
 	@echo "✓ Exécutable: $(TARGET)"
 
-$(TARGET): $(SRC)
+$(TARGET): $(SRC) $(HDR)
 	@echo "Compilation de Polar Doctor pour $(PLATFORM)..."
 	$(CC) -o $(TARGET) $(SRC) $(CFLAGS) $(LDFLAGS)
 
