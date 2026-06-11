@@ -898,8 +898,13 @@ void load_polar_from_grid(PolarData *data, polar_grid_t *grid, double polar[PG_M
         }
     }
 
-    // Remplir les valeurs TWS
+    // Remplir les valeurs TWS — toujours commencer par la colonne TWS 0
+    // (en-tête historique requis par les fichiers .pol/.csv pour l'import)
+    gboolean has_zero_col = (real_speed_min == 0);
     data->num_speeds = 0;
+    if (!has_zero_col) {
+        data->tws_values[data->num_speeds++] = 0;
+    }
     for (int speed = real_speed_min; speed <= real_speed_max; speed += PG_SPEED_STEP) {
         data->tws_values[data->num_speeds++] = speed;
     }
@@ -912,6 +917,12 @@ void load_polar_from_grid(PolarData *data, polar_grid_t *grid, double polar[PG_M
         data->twa_present[angle_idx] = 1;
 
         int speed_idx = 0;
+        if (!has_zero_col) {
+            // Colonne TWS 0 : valeurs nulles
+            data->polar_data[angle_idx][speed_idx] = 0.0;
+            strcpy(data->polar_data_str[angle_idx][speed_idx], "0.00");
+            speed_idx++;
+        }
         for (int speed = real_speed_min; speed <= real_speed_max; speed += PG_SPEED_STEP) {
             double bsp = polar[angle][speed];
             data->polar_data[angle_idx][speed_idx] = bsp;
@@ -935,6 +946,18 @@ int combo_index_to_tws_index(PolarData *data, int combo_idx) {
         count++;
     }
     return data->num_speeds - 1;  // Par défaut, retourner le dernier
+}
+
+// Index par défaut pour le combo TWS "to" : ~7e vitesse ou la dernière disponible.
+// Basé sur le nombre réel d'entrées du combo (TWS 0 exclu) pour éviter un index hors limites.
+int tws_default_to_index(PolarData *data) {
+    int combo_count = 0;
+    for (int i = 0; i < data->num_speeds; i++) {
+        if (data->tws_values[i] != 0) combo_count++;
+    }
+    if (combo_count <= 0) return 0;
+    int last_idx = combo_count - 1;
+    return last_idx > 6 ? 6 : last_idx;
 }
 
 // Initialiser les données de la polaire
@@ -1914,7 +1937,7 @@ void on_open_clicked(GtkWidget *widget, gpointer user_data) {
                 gtk_combo_box_text_append_text(GTK_COMBO_BOX_TEXT(app->tws_to_combo), text);
             }
             gtk_combo_box_set_active(GTK_COMBO_BOX(app->tws_from_combo), 0);
-            int last_idx = app->polar_data->num_speeds > 6 ? 6 : app->polar_data->num_speeds - 1;
+            int last_idx = tws_default_to_index(app->polar_data);
             gtk_combo_box_set_active(GTK_COMBO_BOX(app->tws_to_combo), last_idx);
 
             // Reconstruire le tableau VMG
@@ -2811,7 +2834,7 @@ void on_create_clicked(GtkWidget *widget, gpointer user_data) {
                 gtk_combo_box_text_append_text(GTK_COMBO_BOX_TEXT(app->tws_to_combo), text);
             }
             gtk_combo_box_set_active(GTK_COMBO_BOX(app->tws_from_combo), 0);
-            int last_idx = app->polar_data->num_speeds > 6 ? 6 : app->polar_data->num_speeds - 1;
+            int last_idx = tws_default_to_index(app->polar_data);
             if (last_idx < 0) last_idx = 0;
             gtk_combo_box_set_active(GTK_COMBO_BOX(app->tws_to_combo), last_idx);
 
@@ -2980,7 +3003,7 @@ void on_update_clicked(GtkWidget *widget, gpointer user_data) {
                 gtk_combo_box_text_append_text(GTK_COMBO_BOX_TEXT(app->tws_to_combo), text);
             }
             gtk_combo_box_set_active(GTK_COMBO_BOX(app->tws_from_combo), 0);
-            int last_idx = app->polar_data->num_speeds > 6 ? 6 : app->polar_data->num_speeds - 1;
+            int last_idx = tws_default_to_index(app->polar_data);
             if (last_idx < 0) last_idx = 0;
             gtk_combo_box_set_active(GTK_COMBO_BOX(app->tws_to_combo), last_idx);
 
@@ -3139,7 +3162,7 @@ void on_add_tws_clicked(GtkWidget *widget, gpointer user_data) {
         const char *text = gtk_entry_get_text(GTK_ENTRY(entry));
         int new_tws = atoi(text);
 
-        if (new_tws > 0 && new_tws <= 100) {
+        if (new_tws >= 0 && new_tws <= 100) {
             // Vérifier si la vitesse existe déjà
             gboolean exists = FALSE;
             for (int i = 0; i < app->polar_data->num_speeds; i++) {
@@ -3212,7 +3235,7 @@ void on_add_tws_clicked(GtkWidget *widget, gpointer user_data) {
                     gtk_combo_box_text_append_text(GTK_COMBO_BOX_TEXT(app->tws_to_combo), text_buf);
                 }
                 gtk_combo_box_set_active(GTK_COMBO_BOX(app->tws_from_combo), 0);
-                int last_idx = app->polar_data->num_speeds > 6 ? 6 : app->polar_data->num_speeds - 1;
+                int last_idx = tws_default_to_index(app->polar_data);
                 gtk_combo_box_set_active(GTK_COMBO_BOX(app->tws_to_combo), last_idx);
             }
         } else {
@@ -3220,7 +3243,7 @@ void on_add_tws_clicked(GtkWidget *widget, gpointer user_data) {
                                                               GTK_DIALOG_MODAL,
                                                               GTK_MESSAGE_ERROR,
                                                               GTK_BUTTONS_OK,
-                                                              "%s", TR(app, "La vitesse TWS doit être entre 1 et 100 kn.", "TWS speed must be between 1 and 100 kn."));
+                                                              "%s", TR(app, "La vitesse TWS doit être entre 0 et 100 kn.", "TWS speed must be between 0 and 100 kn."));
             gtk_dialog_run(GTK_DIALOG(error_dialog));
             gtk_widget_destroy(error_dialog);
         }
@@ -3355,7 +3378,7 @@ gboolean on_header_clicked(GtkWidget *widget, GdkEventButton *event, gpointer us
                 gtk_combo_box_text_append_text(GTK_COMBO_BOX_TEXT(app->tws_to_combo), text);
             }
             gtk_combo_box_set_active(GTK_COMBO_BOX(app->tws_from_combo), 0);
-            int last_idx = app->polar_data->num_speeds > 6 ? 6 : app->polar_data->num_speeds - 1;
+            int last_idx = tws_default_to_index(app->polar_data);
             gtk_combo_box_set_active(GTK_COMBO_BOX(app->tws_to_combo), last_idx);
         }
 
