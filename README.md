@@ -15,8 +15,10 @@
 - ✅ Import de bases **VDR SQLite** (.db) de qtVlm
 - ✅ Sélection multiple de fichiers
 - ✅ Agrégation par **percentile configurable** (P85–P95, défaut P90) — vise la performance atteignable
-- ✅ Filtrage des données aberrantes
-- ✅ **Filtre moteur** automatique (exclut les points moteur via la colonne RPM des VDR, si présente)
+- ✅ **Lissage glissant** du STW à l'import NMEA (anti-bruit du loch)
+- ✅ **Débruitage du STW par le SOG** : les sauts du loch (coque déjaugée, roue à aube bloquée)
+  sont rejetés, un courant lent est préservé
+- ✅ **Filtre moteur** : points moteur (RPM > 0) exclus, **sauf charge batteries** (commentaire `Charge` du VDR, moteur débrayé)
 - ✅ Mode mise à jour (ne garde que les meilleures performances)
 
 ### Édition graphique
@@ -152,14 +154,19 @@ Consultez [BUILD.md](BUILD.md) pour les instructions détaillées pour :
 ### Fichiers NMEA
 
 Sentences supportées :
-- **$IIMWV** - Vent (TWA, TWS)
-- **$IIVHW** - Vitesse bateau (STW)
+- **MWV** - Vent (TWA, TWS) — *requise*
+- **VHW** - Vitesse surface / STW — *requise*
+- **RMC, VTG, VBW, RMA, OSD** - Vitesse fond (SOG), lue si présente pour débruiter le STW
 
 Exemple :
 ```
 $IIMWV,045.2,T,12.3,N,A*XX
 $IIVHW,,,,,05.8,N,,*XX
+$GPRMC,123519,A,4807.038,N,01131.000,E,5.8,084.4,230394,,,A*XX
 ```
+
+> Le découpage des trames préserve les champs vides (positions fixes) : un VHW sans cap vrai
+> (`$IIVHW,,T,25.0,M,5.9,N,…`) est correctement interprété.
 
 ### Fichiers VDR (qtVlm)
 
@@ -167,6 +174,9 @@ Base SQLite avec table `VDR` contenant :
 - `TWA` - True Wind Angle (°)
 - `TWS` - True Wind Speed (kn)
 - `STW` - Speed Through Water (kn)
+- `SOG` - Speed Over Ground (kn), optionnelle — sert à débruiter le STW
+- `RPM` - régime moteur, optionnelle — filtre moteur (voir ci-dessous)
+- `COMMENT` - commentaire libre, optionnel — mot-clé `Charge` = moteur débrayé (données conservées)
 
 ### Fichiers polaires (.pol)
 
@@ -231,8 +241,9 @@ polar_doctor.c           # Code source principal (130+ KB)
 │   ├── polar_grid_t    # Buckets de mesures
 │   └── AppWidgets      # Interface GTK
 ├── Moteur de calcul
-│   ├── NMEA parser     # Lecture sentences
-│   ├── VDR reader      # Lecture SQLite (+ filtre RPM)
+│   ├── NMEA parser     # Sentences (champs préservés) + SOG (RMC/VTG/VBW/RMA/OSD)
+│   ├── VDR reader      # SQLite + filtre moteur (RPM/Charge)
+│   ├── Débruitage      # Lissage STW + comparaison SOG
 │   ├── Agrégation      # Percentile (P90)
 │   └── VMG calculator  # Angles optimaux
 ├── Interface GTK
@@ -287,7 +298,7 @@ Développé avec ❤️ pour la communauté nautique
 
 ## 📈 Statistiques
 
-- **Lignes de code :** ~4100
+- **Lignes de code :** ~4400
 - **Fonctions :** 90+
 - **Formats supportés :** 3 (NMEA, VDR, POL)
 - **Langues :** 2 (FR, EN)

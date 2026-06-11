@@ -2,6 +2,32 @@
 
 Toutes les modifications notables du projet seront documentées dans ce fichier.
 
+## [1.2.0] - Non publiée (en cours)
+
+> En cours : finalisation des **mots-clés de commentaire VDR** (état de mer, voilure, points cibles)
+> avant publication.
+
+### Ajouté
+- ✅ **Lissage glissant du STW** à l'import NMEA (moyenne mobile, anti-bruit du loch ;
+  garde anti-manœuvre : pas de lissage à travers un virement/empannage)
+- ✅ **Débruitage du STW par le SOG** (VDR et NMEA) : suit l'écart STW–SOG (qui ne varie
+  que lentement avec le courant) et **rejette les sauts brutaux du loch** — coque déjaugée
+  (pics) ou roue à aube bloquée (valeur figée/nulle) ; un courant établi est préservé
+- ✅ **Lecture du SOG** dans les trames NMEA **RMC, VTG, VBW, RMA, OSD**
+- ✅ **Exception « charge batteries »** au filtre moteur : le mot-clé `Charge` dans le
+  commentaire d'un VDR (moteur débrayé, hélice libre) **conserve** les données — le bateau
+  navigue à la voile. L'état court jusqu'au premier RPM = 0 suivant
+
+### Modifié
+- 🔄 **Filtre moteur VDR** : tout point avec **RPM > 0** est désormais exclu (au lieu du
+  seuil RPM ≥ 150), sauf charge batteries (voir ci-dessus)
+- 🔄 **Plages élargies** : validation TWS 0.1→70 kn, BSP/STW 0.1→50 kn ; grille TWS jusqu'à 70 kn
+
+### Corrigé
+- 🐛 **Parsing NMEA** : les champs vides des trames sont préservés (positions fixes au lieu
+  d'un découpage qui fusionnait les virgules). Corrige l'interprétation des trames **VHW sans
+  cap vrai** (ex. `$IIVHW,,T,25.0,M,5.9,N,…`), dont le STW était auparavant lu de travers
+
 ## [1.1.0] - 2026-06-11
 
 ### Ajouté

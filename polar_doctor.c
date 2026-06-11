@@ -35,10 +35,10 @@
 #endif
 
 #define MAX_ANGLES 37    // 0° à 180° par pas de 5°
-#define MAX_SPEEDS 16    // 4 à 60 kn par pas de variable
+#define MAX_SPEEDS 16    // 4 à 70 kn par pas de variable
 #define ANGLE_STEP 5
 #define MIN_TWS 4
-#define MAX_TWS 60
+#define MAX_TWS 70
 
 // Constantes pour polar_generator
 #define PG_MAX_LINE 512
@@ -53,16 +53,61 @@
 #define DEFAULT_POLAR_PERCENTILE 90
 int g_polar_percentile = DEFAULT_POLAR_PERCENTILE;
 
-// Seuil RPM au-dessus duquel on considère le moteur en route (points exclus).
-// Le ralenti moteur est bien au-dessus ; ce seuil bas suffit à distinguer
-// voile (RPM nul/absent) de moteur, sans les perturbateurs de la gîte.
-#define ENGINE_RPM_THRESHOLD 150
+// Moteur : RPM > 0 = moteur en route -> points exclus de la polaire, SAUF si le
+// commentaire VDR signale une charge batteries (hélice débrayée) : le bateau
+// navigue alors à la voile, les données restent valides. L'état « charge » court
+// du marqueur jusqu'au premier RPM = 0 suivant (fin de session moteur). RPM nul
+// ou absent = voile. La gîte n'est pas utilisée : perturbateur peu fiable.
+#define VDR_COMMENT_CHARGING "Charge"
+
+// Lissage glissant à l'import NMEA : moyenne mobile sur les N derniers points
+// complets (TWA/TWS/BSP) pour atténuer le bruit instrument du loch et de la
+// girouette (loch à ~1 Hz -> N=10 ~ 10 s, comme la pratique courante). Les
+// sentences MWV/VHW ne portant pas d'horodatage, la fenêtre se compte en
+// échantillons, pas en secondes. 0 ou 1 = désactivé. Le VDR (déjà décimé à
+// ~1/min par qtVlm) n'est pas concerné : on n'y touche pas.
+#define NMEA_SMOOTH_WINDOW 10
+#define NMEA_SMOOTH_BUFSZ (NMEA_SMOOTH_WINDOW > 1 ? NMEA_SMOOTH_WINDOW : 1)
+// Au-delà de ce saut de TWA entre deux points complets, on vide la fenêtre :
+// c'est un virement/empannage, on ne lisse jamais à travers une manœuvre.
+#define NMEA_SMOOTH_TWA_BREAK 40.0
+
+// Débruitage du loch (STW) par comparaison à la vitesse fond (SOG, GPS). TWA/TWS
+// arrivent déjà filtrés ; STW non : il peut sauter (coque déjaugée -> pics ; roue
+// à aube bloquée -> valeur figée ou nulle) alors que le SOG est fiable. Le courant
+// fait diverger STW et SOG mais LENTEMENT : on suit l'écart STW-SOG par moyenne
+// exponentielle et on rejette tout point qui s'en écarte BRUTALEMENT. Un courant
+// établi (même fort) passe donc sans souci. Inactif si la base n'a pas de SOG.
+#define STW_SOG_TOL 1.5         // écart max (kn) au-dessus de l'offset courant suivi
+#define STW_SOG_ALPHA 0.1       // poids EMA : delta s'adapte sur ~1/alpha points
+#define STW_SOG_GAP_RESET 1800  // s : au-delà d'un tel trou, on ré-amorce delta
 
 // Structures pour polar_generator
 typedef struct {
     double tws, twa, bsp;
     bool has_tws, has_twa, has_bsp;
+    double sog;        // vitesse fond (RMC/VTG/VBW/RMA/OSD), pour débruiter STW
+    bool has_sog;
 } nmea_data_t;
+
+// Filtre de débruitage STW partagé VDR/NMEA : suit l'offset courant STW-SOG (EMA)
+// et rejette tout point qui s'en écarte brutalement (voir STW_SOG_* plus haut).
+typedef struct {
+    double offset;
+    bool have_offset;
+} stw_sog_filter_t;
+
+static void stw_sog_reset(stw_sog_filter_t *f) { f->have_offset = false; }
+
+// true = STW plausible (à garder) ; false = saut anormal (à rejeter). Met à jour
+// l'offset sur les points acceptés ; le premier point amorce l'offset.
+static bool stw_sog_accept(stw_sog_filter_t *f, double stw, double sog) {
+    double inst = stw - sog;
+    if (!f->have_offset) { f->offset = inst; f->have_offset = true; return true; }
+    if (fabs(inst - f->offset) > STW_SOG_TOL) return false;
+    f->offset = STW_SOG_ALPHA * inst + (1.0 - STW_SOG_ALPHA) * f->offset;
+    return true;
+}
 
 typedef struct data_point {
     double bsp;
@@ -421,8 +466,57 @@ int round_to_bucket(double value, int step) {
     return (int)(round(value / step) * step);
 }
 
+// Découpe une trame sur ',' en PRÉSERVANT les champs vides (contrairement à
+// strtok qui fusionne les délimiteurs). Modifie s en place. Renvoie le nb de champs.
+static int nmea_split(char *s, char **out, int maxf) {
+    int n = 0;
+    if (maxf <= 0) return 0;
+    out[n++] = s;
+    for (char *q = s; *q && n < maxf; q++)
+        if (*q == ',') { *q = '\0'; out[n++] = q + 1; }
+    return n;
+}
+
+// Lit le champ idx comme nombre. false si index hors borne ou champ vide.
+static bool nmea_field_num(char **f, int nf, int idx, double *out) {
+    if (idx < 0 || idx >= nf || !f[idx] || f[idx][0] == '\0') return false;
+    *out = atof(f[idx]);
+    return true;
+}
+
+// Extrait le SOG (nœuds) des trames qui le portent. Met à jour data->sog/has_sog.
+// Découpage robuste aux champs vides (fréquents sur les trames GPS).
+static void parse_sog_sentence(const char *type, char **f, int nf, nmea_data_t *data) {
+    double s;
+    if (strstr(type, "RMC")) {                         // SOG champ 7, valide si statut(2)='A'
+        if (nf > 2 && f[2] && f[2][0] == 'A' && nmea_field_num(f, nf, 7, &s)) {
+            data->sog = s; data->has_sog = true;
+        }
+    } else if (strstr(type, "VTG")) {                  // SOG champ 5, unité(6)='N'
+        if (nmea_field_num(f, nf, 5, &s) &&
+            (nf <= 6 || !f[6] || f[6][0] == '\0' || f[6][0] == 'N')) {
+            data->sog = s; data->has_sog = true;
+        }
+    } else if (strstr(type, "VBW")) {                  // vitesse fond long. champ 4, statut(6)!='V'
+        if (nmea_field_num(f, nf, 4, &s) &&
+            (nf <= 6 || !f[6] || f[6][0] != 'V')) {
+            data->sog = s; data->has_sog = true;
+        }
+    } else if (strstr(type, "RMA")) {                  // SOG champ 8, valide si statut(1)='A'
+        if (nf > 1 && f[1] && f[1][0] == 'A' && nmea_field_num(f, nf, 8, &s)) {
+            data->sog = s; data->has_sog = true;
+        }
+    } else if (strstr(type, "OSD")) {                  // vitesse champ 5, réf(6) sol P/B, unité(9)
+        if (nmea_field_num(f, nf, 5, &s) &&
+            nf > 6 && f[6] && (f[6][0] == 'P' || f[6][0] == 'B')) {
+            if (nf > 9 && f[9] && f[9][0] == 'K') s /= 1.852;   // km/h -> nœuds
+            data->sog = s; data->has_sog = true;
+        }
+    }
+}
+
 bool parse_nmea_sentence(const char *sentence, nmea_data_t *data) {
-    char line[PG_MAX_LINE], parse_buf[PG_MAX_LINE];
+    char line[PG_MAX_LINE];
     strncpy(line, sentence, PG_MAX_LINE - 1);
     line[PG_MAX_LINE - 1] = 0;
 
@@ -435,55 +529,48 @@ bool parse_nmea_sentence(const char *sentence, nmea_data_t *data) {
 
     if (!verify_checksum(p)) return false;
 
-    strncpy(parse_buf, p, PG_MAX_LINE - 1);
-    parse_buf[PG_MAX_LINE - 1] = 0;
-
-    char *star = strchr(parse_buf, '*');
+    char *star = strchr(p, '*');
     if (star) *star = 0;
 
-    char *saveptr = NULL;
-    char *msg_type = strtok_r(parse_buf + 1, ",", &saveptr);
-    if (!msg_type) return false;
+    // Découpage à champs préservés : indispensable car les positions sont fixes et
+    // les champs souvent vides (ex. VHW sans cap vrai : $IIVHW,,T,25.0,M,5.9,N,..
+    // -> le STW est toujours au champ 5). strtok fusionnait les vides et décalait tout.
+    char *fields[24];
+    int nf = nmea_split(p + 1, fields, 24);
+    if (nf < 1) return false;
+    const char *type = fields[0];
 
-    if (strstr(msg_type, "MWV")) {
-        char *angle_str = strtok_r(NULL, ",", &saveptr);
-        char *reference = strtok_r(NULL, ",", &saveptr);
-        char *speed_str = strtok_r(NULL, ",", &saveptr);
-        char *unit = strtok_r(NULL, ",", &saveptr);
-
-        if (angle_str && reference && speed_str && unit) {
-            double angle = atof(angle_str);
-            double speed = atof(speed_str);
-
-            if (reference[0] == 'T' && speed > 0.1 && unit[0] == 'N') {
-                data->twa = fabs(angle);
-                data->tws = speed;
-                data->has_twa = true;
-                data->has_tws = true;
-                if (data->has_bsp) return true;
-            }
+    if (strstr(type, "MWV")) {                 // angle(1) ref(2) vitesse(3) unité(4)
+        double angle, speed;
+        if (nf > 4 && nmea_field_num(fields, nf, 1, &angle) &&
+            nmea_field_num(fields, nf, 3, &speed) &&
+            fields[2][0] == 'T' && speed > 0.1 && fields[4][0] == 'N') {
+            data->twa = fabs(angle);
+            data->tws = speed;
+            data->has_twa = true;
+            data->has_tws = true;
+            if (data->has_bsp) return true;
         }
     }
-    else if (strstr(msg_type, "VHW")) {
-        char *f1 = strtok_r(NULL, ",", &saveptr);
-        char *f2 = strtok_r(NULL, ",", &saveptr);
-        char *speed_knots = strtok_r(NULL, ",", &saveptr);
-        char *unit_knots = strtok_r(NULL, ",", &saveptr);
-
-        if (speed_knots && unit_knots && unit_knots[0] == 'N') {
-            double speed = atof(speed_knots);
-            if (speed > 0.1) {
-                data->bsp = speed;
-                data->has_bsp = true;
-                if (data->has_twa && data->has_tws) return true;
-            }
+    else if (strstr(type, "VHW")) {            // STW nœuds au champ 5, unité 'N' au champ 6
+        double speed;
+        if (nf > 6 && fields[6][0] == 'N' && nmea_field_num(fields, nf, 5, &speed) &&
+            speed > 0.1) {
+            data->bsp = speed;
+            data->has_bsp = true;
+            if (data->has_twa && data->has_tws) return true;
         }
+    }
+    else {
+        // Trames porteuses de SOG : mettent à jour l'état SOG sans « compléter » de
+        // point (le point reste déclenché par la paire MWV+VHW).
+        parse_sog_sentence(type, fields, nf, data);
     }
     return false;
 }
 
 void add_data_point(polar_grid_t *grid, double twa, double tws, double bsp) {
-    if (twa < 0 || twa > 180 || tws < 0 || tws > 50 || bsp < 0 || bsp > 20) return;
+    if (twa < 0 || twa > 180 || tws < 0 || tws > 70 || bsp < 0 || bsp > 50) return;
 
     int angle_bucket = round_to_bucket(twa, PG_ANGLE_STEP);
     int speed_bucket = round_to_bucket(tws, PG_SPEED_STEP);
@@ -547,6 +634,45 @@ double get_polar_value(polar_grid_t *grid, int angle, int speed) {
     return aggregate_cell(grid->points[angle][speed]);
 }
 
+// Moyenne mobile circulaire des derniers points NMEA complets (voir NMEA_SMOOTH_WINDOW).
+typedef struct {
+    double twa[NMEA_SMOOTH_BUFSZ];
+    double tws[NMEA_SMOOTH_BUFSZ];
+    double bsp[NMEA_SMOOTH_BUFSZ];
+    int count;        // échantillons valides dans la fenêtre (<= BUFSZ)
+    int head;         // index d'écriture circulaire
+    double last_twa;  // pour détecter une manœuvre
+    bool have_last;
+} nmea_smoother_t;
+
+static void nmea_smoother_reset(nmea_smoother_t *s) {
+    s->count = 0;
+    s->head = 0;
+    s->have_last = false;
+}
+
+// Ajoute un échantillon brut et renvoie la moyenne mobile (TWA/TWS/BSP). Vide la
+// fenêtre sur un saut de TWA (virement/empannage) pour ne pas lisser au travers.
+static void nmea_smoother_push(nmea_smoother_t *s, double twa, double tws, double bsp,
+                               double *out_twa, double *out_tws, double *out_bsp) {
+    if (s->have_last && fabs(twa - s->last_twa) > NMEA_SMOOTH_TWA_BREAK)
+        nmea_smoother_reset(s);
+    s->last_twa = twa;
+    s->have_last = true;
+
+    s->twa[s->head] = twa;
+    s->tws[s->head] = tws;
+    s->bsp[s->head] = bsp;
+    s->head = (s->head + 1) % NMEA_SMOOTH_BUFSZ;
+    if (s->count < NMEA_SMOOTH_BUFSZ) s->count++;
+
+    double sa = 0.0, sw = 0.0, sb = 0.0;
+    for (int i = 0; i < s->count; i++) { sa += s->twa[i]; sw += s->tws[i]; sb += s->bsp[i]; }
+    *out_twa = sa / s->count;
+    *out_tws = sw / s->count;
+    *out_bsp = sb / s->count;
+}
+
 int process_nmea_file(const char *filename, polar_grid_t *grid, bool update_mode, ProgressContext *progress) {
     FILE *f = fopen(filename, "r");
     if (!f) return -1;
@@ -555,6 +681,10 @@ int process_nmea_file(const char *filename, polar_grid_t *grid, bool update_mode
     int line_count = 0, data_count = 0, filtered_count = 0;
     nmea_data_t current_data;
     memset(&current_data, 0, sizeof(nmea_data_t));
+    nmea_smoother_t smoother;
+    nmea_smoother_reset(&smoother);
+    stw_sog_filter_t stwf;
+    stw_sog_reset(&stwf);
 
     while (fgets(line, sizeof(line), f)) {
         line_count++;
@@ -572,18 +702,32 @@ int process_nmea_file(const char *filename, polar_grid_t *grid, bool update_mode
         }
 
         if (parse_nmea_sentence(line, &current_data)) {
+            // Débruitage du loch : rejette un STW qui saute par rapport au SOG, AVANT
+            // le lissage (pour qu'un pic ne pollue pas la moyenne mobile). Inactif
+            // tant qu'aucune trame SOG n'a été vue.
+            if (current_data.has_sog &&
+                !stw_sog_accept(&stwf, current_data.bsp, current_data.sog)) {
+                filtered_count++;
+                continue;
+            }
+
+            double twa = current_data.twa, tws = current_data.tws, bsp = current_data.bsp;
+            if (NMEA_SMOOTH_WINDOW > 1)
+                nmea_smoother_push(&smoother, current_data.twa, current_data.tws,
+                                   current_data.bsp, &twa, &tws, &bsp);
+
             if (update_mode) {
-                int angle_bucket = round_to_bucket(current_data.twa, PG_ANGLE_STEP);
-                int speed_bucket = round_to_bucket(current_data.tws, PG_SPEED_STEP);
+                int angle_bucket = round_to_bucket(twa, PG_ANGLE_STEP);
+                int speed_bucket = round_to_bucket(tws, PG_SPEED_STEP);
                 double existing = get_polar_value(grid, angle_bucket, speed_bucket);
 
-                if (existing > 0.0 && current_data.bsp < existing * 0.95) {
+                if (existing > 0.0 && bsp < existing * 0.95) {
                     filtered_count++;
                     continue;
                 }
             }
 
-            add_data_point(grid, current_data.twa, current_data.tws, current_data.bsp);
+            add_data_point(grid, twa, tws, bsp);
             data_count++;
         }
     }
@@ -605,6 +749,15 @@ bool vdr_has_column(sqlite3 *db, const char *col) {
     return found;
 }
 
+// Recherche insensible à la casse d'un mot-clé dans un commentaire VDR libre.
+static bool comment_has_keyword(const char *comment, const char *keyword) {
+    if (!comment || !keyword || !*keyword) return false;
+    size_t klen = strlen(keyword);
+    for (const char *p = comment; *p; p++)
+        if (strncasecmp(p, keyword, klen) == 0) return true;
+    return false;
+}
+
 int process_vdr_file(const char *filename, polar_grid_t *grid, bool update_mode, ProgressContext *progress) {
     sqlite3 *db;
     sqlite3_stmt *stmt;
@@ -616,19 +769,24 @@ int process_vdr_file(const char *filename, polar_grid_t *grid, bool update_mode,
         return -1;
     }
 
-    // Si une colonne RPM est présente, exclure les points moteur (RPM nul/absent = voile).
-    // Filtre d'état fiable, contrairement à la gîte (perturbée par vent faible, portant, multicoque).
+    // Le filtre moteur dépend d'un état (charge batteries hélice débrayée) qui se
+    // propage dans le temps -> on traite RPM/COMMENT en C, pas en SQL. On récupère
+    // donc toujours les colonnes aux mêmes indices (NULL si absentes du schéma) et
+    // on ordonne par TIME pour pouvoir propager l'état « charge » d'un point au suivant.
+    bool has_rpm = vdr_has_column(db, "RPM");
+    bool has_comment = vdr_has_column(db, "COMMENT");
+    bool has_time = vdr_has_column(db, "TIME");
+    bool has_sog = vdr_has_column(db, "SOG");
+
     char sql[512];
-    if (vdr_has_column(db, "RPM")) {
-        snprintf(sql, sizeof(sql),
-                 "SELECT TWA, TWS, STW FROM VDR WHERE TWA IS NOT NULL AND TWS IS NOT NULL "
-                 "AND STW IS NOT NULL AND STW > 0 AND (RPM IS NULL OR RPM < %d);",
-                 ENGINE_RPM_THRESHOLD);
-    } else {
-        snprintf(sql, sizeof(sql),
-                 "SELECT TWA, TWS, STW FROM VDR WHERE TWA IS NOT NULL AND TWS IS NOT NULL "
-                 "AND STW IS NOT NULL AND STW > 0;");
-    }
+    snprintf(sql, sizeof(sql),
+             "SELECT TWA, TWS, STW, %s, %s, %s, %s FROM VDR "
+             "WHERE TWA IS NOT NULL AND TWS IS NOT NULL AND STW IS NOT NULL AND STW > 0%s;",
+             has_rpm ? "RPM" : "NULL",
+             has_comment ? "COMMENT" : "NULL",
+             has_sog ? "SOG" : "NULL",
+             has_time ? "TIME" : "0",
+             has_time ? " ORDER BY TIME" : "");
 
     rc = sqlite3_prepare_v2(db, sql, -1, &stmt, NULL);
     if (rc != SQLITE_OK) {
@@ -637,14 +795,49 @@ int process_vdr_file(const char *filename, polar_grid_t *grid, bool update_mode,
     }
 
     int data_count = 0, filtered_count = 0;
+    bool charging = false;  // moteur débrayé en charge : court jusqu'au prochain RPM = 0
+    stw_sog_filter_t stwf;  // débruitage STW via SOG (offset courant suivi)
+    stw_sog_reset(&stwf);
+    long prev_time = 0;
+    bool have_prev_time = false;
 
     while ((rc = sqlite3_step(stmt)) == SQLITE_ROW) {
         double twa = fabs(sqlite3_column_double(stmt, 0));
         double tws = sqlite3_column_double(stmt, 1);
         double stw = sqlite3_column_double(stmt, 2);
+        double rpm = (sqlite3_column_type(stmt, 3) != SQLITE_NULL)
+                     ? sqlite3_column_double(stmt, 3) : 0.0;
+        const char *comment = (sqlite3_column_type(stmt, 4) != SQLITE_NULL)
+                              ? (const char *)sqlite3_column_text(stmt, 4) : NULL;
+        bool has_sog_val = (sqlite3_column_type(stmt, 5) != SQLITE_NULL);
+        double sog = has_sog_val ? sqlite3_column_double(stmt, 5) : 0.0;
+        long t = (long)sqlite3_column_int64(stmt, 6);
 
-        if (twa < 0 || twa > 180 || tws < 0.1 || tws > 50 || stw < 0.1 || stw > 20) {
+        // Mise à jour de l'état moteur (forward-fill) AVANT le test d'exclusion.
+        if (comment_has_keyword(comment, VDR_COMMENT_CHARGING)) charging = true;
+        if (rpm <= 0.0) charging = false;  // fin de session moteur : on referme la fenêtre
+
+        // RPM > 0 et pas en charge débrayée -> moteur embrayé : point écarté.
+        if (rpm > 0.0 && !charging) {
+            filtered_count++;
             continue;
+        }
+
+        if (twa < 0 || twa > 180 || tws < 0.1 || tws > 70 || stw < 0.1 || stw > 50) {
+            continue;
+        }
+
+        // Débruitage du loch : rejette un STW qui s'écarte brutalement de l'offset
+        // courant STW-SOG (pic de déjaugeage, roue à aube bloquée). Le courant lent
+        // est absorbé par l'EMA. Ré-amorçage après un gros trou temporel. Inactif sans SOG.
+        if (has_sog && has_sog_val) {
+            if (have_prev_time && (t - prev_time) > STW_SOG_GAP_RESET) stw_sog_reset(&stwf);
+            prev_time = t;
+            have_prev_time = true;
+            if (!stw_sog_accept(&stwf, stw, sog)) {
+                filtered_count++;           // saut anormal -> on jette ce STW
+                continue;
+            }
         }
 
         if (progress && data_count % 1000 == 0) {
@@ -3928,7 +4121,10 @@ void on_help_clicked(GtkWidget *widget, gpointer user_data) {
         "  - Fichiers supportés : .txt, .nmea, .log (NMEA) et .db (VDR)\n"
         "  - Tous les fichiers sont traités et combinés dans une seule polaire\n"
         "  - Le curseur 'Percentile' (barre d'outils) règle l'agrégation (P85–P95, défaut P90)\n"
-        "  - Filtre moteur automatique si la colonne RPM est présente dans le VDR\n"
+        "  - Lissage glissant du STW à l'import NMEA (anti-bruit du loch)\n"
+        "  - Débruitage du STW par comparaison au SOG : les sauts du loch (coque déjaugée,\n"
+        "    roue à aube bloquée) sont rejetés ; un courant lent est préservé\n"
+        "  - Filtre moteur : points moteur (RPM > 0) exclus, sauf charge batteries (voir VDR)\n"
         "  - Affiche la progression pendant le traitement\n\n"
         "<b>• Mettre à jour</b>\n"
         "  Met à jour la polaire actuelle avec de nouvelles données NMEA/VDR\n"
@@ -3980,12 +4176,14 @@ void on_help_clicked(GtkWidget *widget, gpointer user_data) {
         "  - Calculé pour chaque vitesse de vent (TWS)\n\n"
         "<b>FORMAT DES FICHIERS</b>\n\n"
         "<b>• Fichiers NMEA (.txt, .nmea, .log)</b>\n"
-        "  Nécessite les sentences MWV (vent) et VHW (vitesse bateau)\n"
+        "  Nécessite les sentences MWV (vent) et VHW (vitesse surface)\n"
+        "  SOG lu s'il est présent (RMC, VTG, VBW, RMA, OSD) pour débruiter le STW\n"
         "  Les données sont groupées par buckets de 5° (TWA) et 2 kn (TWS)\n\n"
         "<b>• Fichiers VDR (.db)</b>\n"
-        "  Base SQLite générée par qtVlm\n"
-        "  Requête : SELECT TWA, TWS, STW FROM VDR\n"
-        "  Si une colonne RPM est présente, les points moteur sont exclus automatiquement\n\n"
+        "  Base SQLite générée par qtVlm (TWA, TWS, STW ; SOG, RPM, COMMENT si présents)\n"
+        "  Filtre moteur : un point avec RPM > 0 est exclu, SAUF si le commentaire contient\n"
+        "    « Charge » (moteur débrayé pour charger les batteries : le bateau navigue, on garde)\n"
+        "  Débruitage du STW par le SOG quand la colonne SOG est présente\n\n"
         "<b>• Fichiers polaires (.pol)</b>\n"
         "  Format tabulaire avec séparateur point-virgule\n"
         "  Première ligne : en-têtes TWS\n"
@@ -3996,7 +4194,8 @@ void on_help_clicked(GtkWidget *widget, gpointer user_data) {
         "• Les valeurs sont toujours affichées avec 2 décimales\n"
         "• Un minimum de 3 points est requis par cellule\n"
         "• L'agrégation retient un percentile élevé (P90 par défaut, réglable P85–P95 dans la barre d'outils)\n"
-        "  afin de viser la performance atteignable plutôt que la moyenne";
+        "  afin de viser la performance atteignable plutôt que la moyenne\n"
+        "• Le STW (loch) est fiabilisé par comparaison au SOG (GPS) quand il est disponible";
 
     const char *help_text_en =
         "<b>Polar Doctor - User Manual</b>\n\n"
@@ -4013,7 +4212,10 @@ void on_help_clicked(GtkWidget *widget, gpointer user_data) {
         "  - Supported files: .txt, .nmea, .log (NMEA) and .db (VDR)\n"
         "  - All files are processed and combined into a single polar\n"
         "  - The 'Percentile' toolbar control sets aggregation (P85–P95, default P90)\n"
-        "  - Automatic engine filter when the VDR has an RPM column\n"
+        "  - Sliding-window smoothing of STW on NMEA import (log noise reduction)\n"
+        "  - STW denoising by comparison with SOG: log spikes (hull lifting,\n"
+        "    blocked paddle wheel) are rejected; a slowly-varying current is preserved\n"
+        "  - Engine filter: motoring points (RPM > 0) excluded, except battery charging (see VDR)\n"
         "  - Progress is displayed during processing\n\n"
         "<b>• Update</b>\n"
         "  Update the current polar with new NMEA/VDR data\n"
@@ -4065,12 +4267,14 @@ void on_help_clicked(GtkWidget *widget, gpointer user_data) {
         "  - Calculated for each wind speed (TWS)\n\n"
         "<b>FILE FORMATS</b>\n\n"
         "<b>• NMEA files (.txt, .nmea, .log)</b>\n"
-        "  Requires MWV (wind) and VHW (boat speed) sentences\n"
+        "  Requires MWV (wind) and VHW (speed through water) sentences\n"
+        "  SOG read when present (RMC, VTG, VBW, RMA, OSD) to denoise STW\n"
         "  Data is grouped by 5° (TWA) and 2 kn (TWS) buckets\n\n"
         "<b>• VDR files (.db)</b>\n"
-        "  SQLite database generated by qtVlm\n"
-        "  Query: SELECT TWA, TWS, STW FROM VDR\n"
-        "  If an RPM column is present, engine-on points are excluded automatically\n\n"
+        "  SQLite database generated by qtVlm (TWA, TWS, STW; SOG, RPM, COMMENT if present)\n"
+        "  Engine filter: a point with RPM > 0 is excluded, EXCEPT when the comment contains\n"
+        "    \"Charge\" (engine in neutral to charge batteries: the boat is sailing, kept)\n"
+        "  STW denoised using SOG when the SOG column is present\n\n"
         "<b>• Polar files (.pol)</b>\n"
         "  Tabular format with semicolon separator\n"
         "  First row: TWS headers\n"
@@ -4081,7 +4285,8 @@ void on_help_clicked(GtkWidget *widget, gpointer user_data) {
         "• Values are always displayed with 2 decimals\n"
         "• Minimum of 3 points required per cell\n"
         "• Aggregation keeps a high percentile (P90 by default, adjustable P85–P95 in the toolbar)\n"
-        "  to target achievable performance rather than the average";
+        "  to target achievable performance rather than the average\n"
+        "• STW (log) is made more reliable by comparison with SOG (GPS) when available";
 
     const char *help_text = TR(app, help_text_fr, help_text_en);
 
