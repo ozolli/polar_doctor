@@ -122,6 +122,15 @@ typedef struct {
     GtkWidget *btn_help;
     GtkWidget *percentile_spin;  // Percentile d'agrégation (génération/MAJ)
     GtkWidget *percentile_label;
+    // Mode dynamique (clic sur le diagramme façon qtVlm)
+    GtkWidget *dynamic_check;     // Case à cocher "Mode dynamique"
+    GtkWidget *dynamic_tws_spin;  // Saisie TWS libre (ex. 9.85)
+    GtkWidget *dynamic_tws_label;
+    GtkWidget *dynamic_info;      // Zone texte TWA/AWA/AWS/BS/VMG ou résumé
+    GtkWidget *legend_container;  // Légende couleurs par TWS (mode multi-courbes)
+    gboolean dynamic_mode;        // Mode dynamique actif
+    gboolean dragging;            // Bouton gauche maintenu sur le diagramme
+    double drag_twa;              // TWA courant pendant le glissé
     // Labels pour traduction
     GtkWidget *tws_from_label;
     GtkWidget *tws_to_label;
@@ -159,6 +168,7 @@ void init_polar_data(PolarData *data);
 void rebuild_data_tab(AppWidgets *app);
 void update_data_tab(AppWidgets *app);
 void rebuild_vmg_table(AppWidgets *app);
+void rebuild_legend(AppWidgets *app);
 void on_tws_changed(GtkWidget *widget, gpointer user_data);
 void on_cell_changed(GtkEntry *entry, gpointer user_data);
 gboolean prompt_save_changes(AppWidgets *app);
@@ -174,6 +184,12 @@ gboolean on_header_clicked(GtkWidget *widget, GdkEventButton *event, gpointer us
 void on_help_clicked(GtkWidget *widget, gpointer user_data);
 void on_lang_clicked(GtkWidget *widget, gpointer user_data);
 void on_percentile_changed(GtkWidget *widget, gpointer user_data);
+void on_dynamic_toggled(GtkWidget *widget, gpointer user_data);
+void on_dynamic_tws_changed(GtkWidget *widget, gpointer user_data);
+gboolean on_diagram_button_press(GtkWidget *widget, GdkEventButton *event, gpointer user_data);
+gboolean on_diagram_motion(GtkWidget *widget, GdkEventMotion *event, gpointer user_data);
+gboolean on_diagram_button_release(GtkWidget *widget, GdkEventButton *event, gpointer user_data);
+void update_dynamic_info(AppWidgets *app);
 
 // ============================================================================
 // Dialogues de fichiers natifs Windows (évite les crashes GTK)
@@ -1103,6 +1119,172 @@ gboolean save_polar_file(const char *filename, PolarData *data) {
 }
 
 // Callback pour dessiner le diagramme polaire
+// Interpolation bilinéaire de la BSP dans une PolarData (grille TWA x TWS irrégulière).
+// twa_values et tws_values sont supposés triés croissants ; clampe hors limites.
+double interpolate_polar_bsp(PolarData *data, double twa, double tws) {
+    if (data->num_angles < 1 || data->num_speeds < 1) return 0.0;
+
+    // Rangées TWA présentes encadrant twa
+    int r_lo = -1, r_hi = -1;
+    for (int i = 0; i < data->num_angles; i++) {
+        if (!data->twa_present[i]) continue;
+        if (data->twa_values[i] <= twa) r_lo = i;
+        if (data->twa_values[i] >= twa && r_hi < 0) r_hi = i;
+    }
+    if (r_lo < 0) r_lo = r_hi;
+    if (r_hi < 0) r_hi = r_lo;
+    if (r_lo < 0) return 0.0;
+
+    // Colonnes TWS encadrant tws
+    int c_lo = -1, c_hi = -1;
+    for (int j = 0; j < data->num_speeds; j++) {
+        if (data->tws_values[j] <= tws) c_lo = j;
+        if (data->tws_values[j] >= tws && c_hi < 0) c_hi = j;
+    }
+    if (c_lo < 0) c_lo = c_hi;
+    if (c_hi < 0) c_hi = c_lo;
+    if (c_lo < 0) return 0.0;
+
+    double f_twa = (data->twa_values[r_hi] != data->twa_values[r_lo])
+        ? (twa - data->twa_values[r_lo]) / (double)(data->twa_values[r_hi] - data->twa_values[r_lo]) : 0.0;
+    double f_tws = (data->tws_values[c_hi] != data->tws_values[c_lo])
+        ? (tws - data->tws_values[c_lo]) / (double)(data->tws_values[c_hi] - data->tws_values[c_lo]) : 0.0;
+
+    double v_ll = data->polar_data[r_lo][c_lo], v_lr = data->polar_data[r_lo][c_hi];
+    double v_hl = data->polar_data[r_hi][c_lo], v_hr = data->polar_data[r_hi][c_hi];
+    double v_lo = v_ll * (1.0 - f_tws) + v_lr * f_tws;  // à r_lo
+    double v_hi = v_hl * (1.0 - f_tws) + v_hr * f_tws;  // à r_hi
+    return v_lo * (1.0 - f_twa) + v_hi * f_twa;
+}
+
+// BSP maximale sur la courbe d'une TWS donnée + le TWA où elle culmine (parmi les rangées présentes)
+double dynamic_curve_max(PolarData *data, double tws, double *out_twa) {
+    double best = 0.0, best_twa = 0.0;
+    for (int i = 0; i < data->num_angles; i++) {
+        if (!data->twa_present[i]) continue;
+        double bsp = interpolate_polar_bsp(data, data->twa_values[i], tws);
+        if (bsp > best) { best = bsp; best_twa = data->twa_values[i]; }
+    }
+    if (out_twa) *out_twa = best_twa;
+    return best;
+}
+
+// BSP maximale sur toute la polaire + la TWS et le TWA correspondants
+double polar_absolute_max(PolarData *data, double *out_tws, double *out_twa) {
+    double best = 0.0, best_tws = 0.0, best_twa = 0.0;
+    for (int i = 0; i < data->num_angles; i++) {
+        if (!data->twa_present[i]) continue;
+        for (int j = 0; j < data->num_speeds; j++) {
+            if (data->polar_data[i][j] > best) {
+                best = data->polar_data[i][j];
+                best_tws = data->tws_values[j];
+                best_twa = data->twa_values[i];
+            }
+        }
+    }
+    if (out_tws) *out_tws = best_tws;
+    if (out_twa) *out_twa = best_twa;
+    return best;
+}
+
+// Couleur distincte par TWS (indexée sur la colonne), partagée entre courbes et légende.
+static void tws_palette_color(int idx, double *r, double *g, double *b) {
+    static const double pal[][3] = {
+        {0.20, 0.40, 1.00},  // bleu
+        {0.00, 0.80, 0.00},  // vert
+        {0.90, 0.85, 0.00},  // jaune
+        {1.00, 0.00, 1.00},  // magenta
+        {1.00, 0.50, 0.40},  // saumon
+        {0.65, 0.65, 0.65},  // gris
+        {1.00, 0.55, 0.00},  // orange
+        {0.40, 0.60, 1.00},  // bleu clair
+        {1.00, 0.40, 0.70},  // rose
+        {0.60, 0.60, 0.20},  // olive
+        {0.40, 1.00, 0.50},  // vert clair
+        {0.00, 0.80, 0.80},  // cyan
+    };
+    int k = ((idx % 12) + 12) % 12;
+    *r = pal[k][0]; *g = pal[k][1]; *b = pal[k][2];
+}
+
+// Angles VMG optimaux d'une courbe (près et portant) pour une TWS donnée, par balayage fin
+// interpolé. En deçà de a_up (près trop serré) et au-delà de a_dn (portant trop bas) : VMG dégradé.
+static void vmg_optimal_angles(PolarData *data, double tws, double *a_up, double *a_dn) {
+    double best_up = -1e9, best_dn = -1e9;
+    *a_up = 0.0; *a_dn = 180.0;
+    for (double a = 0.0; a <= 180.0; a += 0.1) {
+        double bsp = interpolate_polar_bsp(data, a, tws);
+        if (bsp < 0.01) continue;
+        double vmg = bsp * cos(a * M_PI / 180.0);  // >0 au près, <0 au portant
+        if (a < 90.0 && vmg > best_up) { best_up = vmg; *a_up = a; }
+        if (a > 90.0 && -vmg > best_dn) { best_dn = -vmg; *a_dn = a; }
+    }
+}
+
+// Trace une courbe polaire lissée (Catmull-Rom), dans la couleur (ur,ug,ub) sur la plage
+// VMG utile [a_up, a_dn] et rouge en dehors (zones de VMG dégradé).
+static void draw_polar_curve(cairo_t *cr, const double *px, const double *py,
+                             const double *ang, int n, double a_up, double a_dn,
+                             double ur, double ug, double ub) {
+    if (n < 2) return;
+    cairo_set_line_width(cr, 2.0);
+    for (int i = 0; i < n - 1; i++) {
+        double x1 = px[i], y1 = py[i], x2 = px[i + 1], y2 = py[i + 1];
+        double x0 = (i == 0) ? 2 * x1 - x2 : px[i - 1];
+        double y0 = (i == 0) ? 2 * y1 - y2 : py[i - 1];
+        double x3 = (i == n - 2) ? 2 * x2 - x1 : px[i + 2];
+        double y3 = (i == n - 2) ? 2 * y2 - y1 : py[i + 2];
+        double t = 0.5;
+        double midang = (ang[i] + ang[i + 1]) * 0.5;
+        if (midang >= a_up && midang <= a_dn)
+            cairo_set_source_rgb(cr, ur, ug, ub);      // VMG utile : couleur de la TWS
+        else
+            cairo_set_source_rgb(cr, 0.9, 0.0, 0.0);   // VMG dégradé : rouge
+        cairo_new_path(cr);
+        cairo_move_to(cr, x1, y1);
+        cairo_curve_to(cr, x1 + (x2 - x0) * t / 6.0, y1 + (y2 - y0) * t / 6.0,
+                           x2 - (x3 - x1) * t / 6.0, y2 - (y3 - y1) * t / 6.0, x2, y2);
+        cairo_stroke(cr);
+    }
+}
+
+// Trace la courbe d'une TWS donnée : points aux TWA de la polaire + points-frontières
+// exactement aux angles VMG optimaux (a_up, a_dn) pour que la bascule rouge/vert tombe
+// précisément à l'angle calculé (cohérent avec le tableau VMG). useful color = (ur,ug,ub).
+static void draw_tws_curve(cairo_t *cr, PolarData *data, double tws,
+                           int center_x, int center_y, double radius, int max_scale,
+                           double ur, double ug, double ub) {
+    double a_up, a_dn;
+    vmg_optimal_angles(data, tws, &a_up, &a_dn);
+
+    // Angles d'échantillonnage : rangées présentes + frontières VMG, triés
+    double angs[MAX_ANGLES + 2];
+    int m = 0;
+    for (int i = 0; i < data->num_angles; i++)
+        if (data->twa_present[i]) angs[m++] = data->twa_values[i];
+    angs[m++] = a_up;
+    angs[m++] = a_dn;
+    for (int i = 0; i < m - 1; i++)
+        for (int j = i + 1; j < m; j++)
+            if (angs[i] > angs[j]) { double t = angs[i]; angs[i] = angs[j]; angs[j] = t; }
+
+    // Points (x,y) avec BS interpolée, en évitant les doublons d'angle
+    double px[MAX_ANGLES + 2], py[MAX_ANGLES + 2], ang[MAX_ANGLES + 2];
+    int n = 0;
+    for (int i = 0; i < m; i++) {
+        if (n > 0 && fabs(angs[i] - ang[n - 1]) < 1e-6) continue;
+        double bsp = interpolate_polar_bsp(data, angs[i], tws);
+        if (bsp < 0.01) continue;
+        double rad = angs[i] * M_PI / 180.0;
+        double r = (bsp / max_scale) * radius;
+        px[n] = center_x + r * sin(rad);
+        py[n] = center_y - r * cos(rad);
+        ang[n] = angs[i];
+        n++;
+    }
+    draw_polar_curve(cr, px, py, ang, n, a_up, a_dn, ur, ug, ub);
+}
+
 static gboolean draw_polar_diagram(GtkWidget *widget, cairo_t *cr, gpointer user_data) {
     AppWidgets *app = (AppWidgets *)user_data;
     PolarData *data = app->polar_data;
@@ -1142,12 +1324,20 @@ static gboolean draw_polar_diagram(GtkWidget *widget, cairo_t *cr, gpointer user
         tws_to_idx = tmp;
     }
 
-    // Trouver la vitesse maximale du bateau (BSP) pour les TWS affichés uniquement
+    // En mode dynamique, la TWS provient du champ libre (interpolation)
+    double dyn_tws = app->dynamic_mode
+        ? gtk_spin_button_get_value(GTK_SPIN_BUTTON(app->dynamic_tws_spin)) : 0.0;
+
+    // Trouver la vitesse maximale du bateau (BSP) pour l'échelle
     double max_bsp = 0.0;
-    for (int i = 0; i < MAX_ANGLES; i++) {
-        for (int j = tws_from_idx; j <= tws_to_idx && j < data->num_speeds; j++) {
-            if (data->polar_data[i][j] > max_bsp) {
-                max_bsp = data->polar_data[i][j];
+    if (app->dynamic_mode) {
+        max_bsp = dynamic_curve_max(data, dyn_tws, NULL);
+    } else {
+        for (int i = 0; i < MAX_ANGLES; i++) {
+            for (int j = tws_from_idx; j <= tws_to_idx && j < data->num_speeds; j++) {
+                if (data->polar_data[i][j] > max_bsp) {
+                    max_bsp = data->polar_data[i][j];
+                }
             }
         }
     }
@@ -1211,92 +1401,127 @@ static gboolean draw_polar_diagram(GtkWidget *widget, cairo_t *cr, gpointer user
         }
     }
 
-    // Dessiner les courbes polaires pour chaque TWS
-    double colors[][3] = {
-        {0.0, 0.0, 1.0},   // bleu
-        {1.0, 0.0, 0.0},   // rouge
-        {0.0, 1.0, 0.0},   // vert
-        {0.0, 0.0, 0.0},   // noir
-        {1.0, 0.0, 1.0},   // magenta
-        {0.0, 1.0, 1.0},   // cyan
-        {0.5, 0.5, 0.5},   // gris
-    };
+    // --- Mode dynamique : courbe interpolée unique + ligne bleue au glissé ---
+    if (app->dynamic_mode) {
+        if (dyn_tws > 0.0 && max_bsp > 0.01) {
+            draw_tws_curve(cr, data, dyn_tws, center_x, center_y, radius, max_scale,
+                           0.0, 0.8, 0.0);  // partie utile en vert
 
-    cairo_set_line_width(cr, 2.0);
+            // Ligne bleue : uniquement pendant le clic maintenu
+            if (app->dragging) {
+                double bsp = interpolate_polar_bsp(data, app->drag_twa, dyn_tws);
+                double rad = app->drag_twa * M_PI / 180.0;
+                double r = (bsp / max_scale) * radius;
+                cairo_set_source_rgb(cr, 0.0, 0.0, 1.0);
+                cairo_set_line_width(cr, 3.0);
+                cairo_new_path(cr);
+                cairo_move_to(cr, center_x, center_y);
+                cairo_line_to(cr, center_x + r * sin(rad), center_y - r * cos(rad));
+                cairo_stroke(cr);
+            }
+        }
+        return FALSE;
+    }
 
+    // Dessiner les courbes polaires pour chaque TWS (couleur par TWS = VMG utile, rouge = dégradé)
     for (int speed_idx = tws_from_idx; speed_idx <= tws_to_idx && speed_idx < data->num_speeds; speed_idx++) {
         int tws = data->tws_values[speed_idx];
         if (tws == 0) continue;  // Ne pas dessiner TWS 0
 
-        int color_idx = speed_idx % 7;
-        cairo_set_source_rgb(cr, colors[color_idx][0], colors[color_idx][1], colors[color_idx][2]);
-
-        // Collecter les points tribord seulement (0° à 180°)
-        double points_x[MAX_ANGLES];
-        double points_y[MAX_ANGLES];
-        int num_points = 0;
-
-        for (int angle_idx = 0; angle_idx < data->num_angles; angle_idx++) {
-            if (!data->twa_present[angle_idx]) continue;
-            double bsp = data->polar_data[angle_idx][speed_idx];
-            if (bsp < 0.01) continue;
-
-            double angle = data->twa_values[angle_idx];
-            double rad = angle * M_PI / 180.0;
-            double r = (bsp / max_scale) * radius;
-            points_x[num_points] = center_x + r * sin(rad);
-            points_y[num_points] = center_y - r * cos(rad);
-            num_points++;
-        }
-
-        if (num_points < 2) continue;
-
-        // Dessiner avec lissage Catmull-Rom
-        cairo_new_path(cr);  // Commencer un nouveau chemin pour cette courbe
-        cairo_move_to(cr, points_x[0], points_y[0]);
-
-        for (int i = 0; i < num_points - 1; i++) {
-            // Points actuels
-            double x1 = points_x[i];
-            double y1 = points_y[i];
-            double x2 = points_x[i + 1];
-            double y2 = points_y[i + 1];
-
-            // Points voisins pour Catmull-Rom
-            double x0, y0, x3, y3;
-
-            if (i == 0) {
-                // Premier segment : extrapoler le point précédent
-                x0 = 2 * x1 - x2;
-                y0 = 2 * y1 - y2;
-            } else {
-                x0 = points_x[i - 1];
-                y0 = points_y[i - 1];
-            }
-
-            if (i == num_points - 2) {
-                // Dernier segment : extrapoler le point suivant
-                x3 = 2 * x2 - x1;
-                y3 = 2 * y2 - y1;
-            } else {
-                x3 = points_x[i + 2];
-                y3 = points_y[i + 2];
-            }
-
-            // Calcul des points de contrôle Catmull-Rom avec tension 0.5
-            double tension = 0.5;
-            double cp1x = x1 + (x2 - x0) * tension / 6.0;
-            double cp1y = y1 + (y2 - y0) * tension / 6.0;
-            double cp2x = x2 - (x3 - x1) * tension / 6.0;
-            double cp2y = y2 - (y3 - y1) * tension / 6.0;
-
-            cairo_curve_to(cr, cp1x, cp1y, cp2x, cp2y, x2, y2);
-        }
-
-        cairo_stroke(cr);
+        double cr_, cg_, cb_;
+        tws_palette_color(speed_idx, &cr_, &cg_, &cb_);
+        draw_tws_curve(cr, data, tws, center_x, center_y, radius, max_scale, cr_, cg_, cb_);
     }
 
     return FALSE;
+}
+
+// TWA correspondant à un point cliqué sur le diagramme (0° en haut, 180° en bas)
+static double diagram_event_twa(GtkWidget *w, double ex, double ey) {
+    int height = gtk_widget_get_allocated_height(w);
+    int margin = 80, center_x = margin, center_y = height / 2;
+    double dx = ex - center_x, dy = center_y - ey;
+    double ang = atan2(dx, dy) * 180.0 / M_PI;
+    if (ang < 0) ang = 0;
+    if (ang > 180) ang = 180;
+    return ang;
+}
+
+// Met à jour le panneau du mode dynamique : valeurs live pendant le glissé, résumé sinon
+void update_dynamic_info(AppWidgets *app) {
+    if (!app->dynamic_info) return;
+    if (!app->dynamic_mode) { gtk_label_set_text(GTK_LABEL(app->dynamic_info), ""); return; }
+
+    PolarData *data = app->polar_data;
+    double tws = gtk_spin_button_get_value(GTK_SPIN_BUTTON(app->dynamic_tws_spin));
+    char buf[256];
+
+    if (app->dragging) {
+        double twa = app->drag_twa;
+        double bs = interpolate_polar_bsp(data, twa, tws);
+        double tr = twa * M_PI / 180.0;
+        double aws = sqrt(tws * tws + bs * bs + 2.0 * tws * bs * cos(tr));
+        double awa = atan2(tws * sin(tr), bs + tws * cos(tr)) * 180.0 / M_PI;
+        double vmg = bs * cos(tr);
+        snprintf(buf, sizeof(buf),
+                 "TWA   %.0f°\nAWA  %.2f°   AWS  %.2f kts\nBS %.2f kts   VMG %.2f kts",
+                 twa, awa, aws, bs, vmg);
+    } else {
+        double cmax_twa = 0, amax_tws = 0, amax_twa = 0;
+        double cmax = dynamic_curve_max(data, tws, &cmax_twa);
+        double amax = polar_absolute_max(data, &amax_tws, &amax_twa);
+        snprintf(buf, sizeof(buf),
+                 TR(app, "Vitesse max: %.2f nds à %.2f°\nVitesse max absolue: %.2f nds\nTWS:%.2f nds TWA:%.2f°",
+                         "Max speed: %.2f kn at %.2f°\nAbsolute max speed: %.2f kn\nTWS:%.2f kn TWA:%.2f°"),
+                 cmax, cmax_twa, amax, amax_tws, amax_twa);
+    }
+    gtk_label_set_text(GTK_LABEL(app->dynamic_info), buf);
+}
+
+gboolean on_diagram_button_press(GtkWidget *widget, GdkEventButton *event, gpointer user_data) {
+    AppWidgets *app = (AppWidgets *)user_data;
+    if (!app->dynamic_mode || event->button != 1) return FALSE;
+    app->dragging = TRUE;
+    app->drag_twa = round(diagram_event_twa(widget, event->x, event->y));
+    update_dynamic_info(app);
+    gtk_widget_queue_draw(widget);
+    return TRUE;
+}
+
+gboolean on_diagram_motion(GtkWidget *widget, GdkEventMotion *event, gpointer user_data) {
+    AppWidgets *app = (AppWidgets *)user_data;
+    if (!app->dynamic_mode || !app->dragging) return FALSE;
+    app->drag_twa = round(diagram_event_twa(widget, event->x, event->y));
+    update_dynamic_info(app);
+    gtk_widget_queue_draw(widget);
+    return TRUE;
+}
+
+gboolean on_diagram_button_release(GtkWidget *widget, GdkEventButton *event, gpointer user_data) {
+    AppWidgets *app = (AppWidgets *)user_data;
+    if (event->button != 1) return FALSE;
+    app->dragging = FALSE;
+    update_dynamic_info(app);  // bascule sur le résumé
+    gtk_widget_queue_draw(widget);
+    return TRUE;
+}
+
+void on_dynamic_toggled(GtkWidget *widget, gpointer user_data) {
+    AppWidgets *app = (AppWidgets *)user_data;
+    app->dynamic_mode = gtk_toggle_button_get_active(GTK_TOGGLE_BUTTON(widget));
+    app->dragging = FALSE;
+    gtk_widget_set_visible(app->dynamic_tws_label, app->dynamic_mode);
+    gtk_widget_set_visible(app->dynamic_tws_spin, app->dynamic_mode);
+    update_dynamic_info(app);
+    rebuild_legend(app);  // masquer/afficher la légende selon le mode
+    gtk_widget_queue_draw(app->polar_view);
+}
+
+void on_dynamic_tws_changed(GtkWidget *widget, gpointer user_data) {
+    AppWidgets *app = (AppWidgets *)user_data;
+    (void)widget;
+    update_dynamic_info(app);
+    gtk_widget_queue_draw(app->polar_view);
 }
 
 // Recréer complètement l'onglet données (pour changement de colonnes)
@@ -1523,6 +1748,12 @@ GtkWidget *create_diagram_tab(AppWidgets *app) {
     GtkWidget *drawing_area = gtk_drawing_area_new();
     gtk_widget_set_size_request(drawing_area, 600, 600);
     g_signal_connect(G_OBJECT(drawing_area), "draw", G_CALLBACK(draw_polar_diagram), app);
+    // Événements souris pour le mode dynamique (clic maintenu + glissé)
+    gtk_widget_add_events(drawing_area,
+        GDK_BUTTON_PRESS_MASK | GDK_BUTTON_RELEASE_MASK | GDK_BUTTON1_MOTION_MASK);
+    g_signal_connect(G_OBJECT(drawing_area), "button-press-event", G_CALLBACK(on_diagram_button_press), app);
+    g_signal_connect(G_OBJECT(drawing_area), "motion-notify-event", G_CALLBACK(on_diagram_motion), app);
+    g_signal_connect(G_OBJECT(drawing_area), "button-release-event", G_CALLBACK(on_diagram_button_release), app);
     gtk_box_pack_start(GTK_BOX(hbox), drawing_area, TRUE, TRUE, 0);
 
     // Panneau latéral droit
@@ -1558,9 +1789,39 @@ GtkWidget *create_diagram_tab(AppWidgets *app) {
 
     gtk_box_pack_start(GTK_BOX(vbox_right), selector_box, FALSE, FALSE, 0);
 
+    // Mode dynamique : case à cocher + champ TWS libre (façon qtVlm)
+    GtkWidget *dyn_box = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 5);
+    app->dynamic_check = gtk_check_button_new_with_label(TR(app, "Mode dynamique", "Dynamic mode"));
+    g_signal_connect(app->dynamic_check, "toggled", G_CALLBACK(on_dynamic_toggled), app);
+    gtk_box_pack_start(GTK_BOX(dyn_box), app->dynamic_check, FALSE, FALSE, 0);
+
+    app->dynamic_tws_label = gtk_label_new("TWS :");
+    gtk_widget_set_no_show_all(app->dynamic_tws_label, TRUE);  // masqué tant que mode off
+    gtk_box_pack_start(GTK_BOX(dyn_box), app->dynamic_tws_label, FALSE, FALSE, 0);
+    app->dynamic_tws_spin = gtk_spin_button_new_with_range(0.1, 50.0, 1.0);  // +/- de 1 kn
+    gtk_widget_set_no_show_all(app->dynamic_tws_spin, TRUE);
+    gtk_spin_button_set_digits(GTK_SPIN_BUTTON(app->dynamic_tws_spin), 2);  // décimales au clavier
+    gtk_spin_button_set_value(GTK_SPIN_BUTTON(app->dynamic_tws_spin), 12.0);
+    gtk_widget_set_tooltip_text(app->dynamic_tws_spin,
+        TR(app, "Vitesse de vent (TWS) pour la courbe interpolée. Clic maintenu sur le diagramme pour lire TWA/AWA/AWS/BS/VMG.",
+               "Wind speed (TWS) for the interpolated curve. Press and hold on the diagram to read TWA/AWA/AWS/BS/VMG."));
+    g_signal_connect(app->dynamic_tws_spin, "value-changed", G_CALLBACK(on_dynamic_tws_changed), app);
+    gtk_box_pack_start(GTK_BOX(dyn_box), app->dynamic_tws_spin, FALSE, FALSE, 0);
+    gtk_box_pack_start(GTK_BOX(vbox_right), dyn_box, FALSE, FALSE, 0);
+
     // Container pour le tableau VMG (sera rempli dynamiquement)
     app->vmg_container = gtk_box_new(GTK_ORIENTATION_VERTICAL, 0);
     gtk_box_pack_start(GTK_BOX(vbox_right), app->vmg_container, TRUE, TRUE, 0);
+
+    // Panneau d'information du mode dynamique (valeurs live ou résumé)
+    app->dynamic_info = gtk_label_new("");
+    gtk_label_set_xalign(GTK_LABEL(app->dynamic_info), 0.0);
+    gtk_label_set_justify(GTK_LABEL(app->dynamic_info), GTK_JUSTIFY_LEFT);
+    gtk_box_pack_start(GTK_BOX(vbox_right), app->dynamic_info, FALSE, FALSE, 0);
+
+    // Légende des couleurs par TWS (mode multi-courbes)
+    app->legend_container = gtk_box_new(GTK_ORIENTATION_VERTICAL, 0);
+    gtk_box_pack_start(GTK_BOX(vbox_right), app->legend_container, FALSE, FALSE, 0);
 
     gtk_box_pack_start(GTK_BOX(hbox), vbox_right, FALSE, FALSE, 0);
 
@@ -1777,6 +2038,43 @@ void rebuild_vmg_table(AppWidgets *app) {
     gtk_box_pack_start(GTK_BOX(app->vmg_container), vmg_frame, TRUE, TRUE, 0);
 
     gtk_widget_show_all(app->vmg_container);
+
+    rebuild_legend(app);  // garder la légende des couleurs synchronisée
+}
+
+// Reconstruit la légende des couleurs par TWS (mode multi-courbes uniquement)
+void rebuild_legend(AppWidgets *app) {
+    if (!app->legend_container) return;
+
+    GList *children = gtk_container_get_children(GTK_CONTAINER(app->legend_container));
+    for (GList *it = children; it != NULL; it = g_list_next(it))
+        gtk_widget_destroy(GTK_WIDGET(it->data));
+    g_list_free(children);
+
+    if (app->dynamic_mode) return;  // pas de légende en mode dynamique (TWS unique)
+
+    PolarData *data = app->polar_data;
+    int combo_from = gtk_combo_box_get_active(GTK_COMBO_BOX(app->tws_from_combo));
+    int combo_to = gtk_combo_box_get_active(GTK_COMBO_BOX(app->tws_to_combo));
+    int from = (combo_from >= 0) ? combo_index_to_tws_index(data, combo_from) : 0;
+    int to = (combo_to >= 0) ? combo_index_to_tws_index(data, combo_to) : data->num_speeds - 1;
+    if (from > to) { int t = from; from = to; to = t; }
+
+    for (int i = from; i <= to && i < data->num_speeds; i++) {
+        int tws = data->tws_values[i];
+        if (tws == 0) continue;
+        double r, g, b;
+        tws_palette_color(i, &r, &g, &b);
+        char markup[128];
+        snprintf(markup, sizeof(markup),
+                 "<span foreground=\"#%02x%02x%02x\">TWS %d kts</span>",
+                 (int)(r * 255), (int)(g * 255), (int)(b * 255), tws);
+        GtkWidget *lbl = gtk_label_new(NULL);
+        gtk_label_set_markup(GTK_LABEL(lbl), markup);
+        gtk_label_set_xalign(GTK_LABEL(lbl), 0.0);
+        gtk_box_pack_start(GTK_BOX(app->legend_container), lbl, FALSE, FALSE, 0);
+    }
+    gtk_widget_show_all(app->legend_container);
 }
 
 // Callback pour changement de valeur dans une cellule
@@ -3595,6 +3893,8 @@ void update_interface_language(AppWidgets *app) {
     gtk_button_set_label(GTK_BUTTON(app->btn_delete), TR(app, "Suppression", "Delete"));
     gtk_button_set_label(GTK_BUTTON(app->btn_help), TR(app, "Aide", "Help"));
     gtk_label_set_text(GTK_LABEL(app->percentile_label), TR(app, "Percentile :", "Percentile:"));
+    gtk_button_set_label(GTK_BUTTON(app->dynamic_check), TR(app, "Mode dynamique", "Dynamic mode"));
+    update_dynamic_info(app);  // rafraîchir le résumé dans la langue courante
 
     // Mettre à jour les labels TWS
     gtk_label_set_text(GTK_LABEL(app->tws_from_label), TR(app, "Voir les polaires pour les TWS de", "View polars for TWS from"));
@@ -3826,6 +4126,9 @@ int main(int argc, char *argv[]) {
     app.delete_mode = FALSE;
     app.blink_timer_id = 0;
     app.blink_state = FALSE;
+    app.dynamic_mode = FALSE;
+    app.dragging = FALSE;
+    app.drag_twa = 0.0;
 
     create_main_window(&app);
 
