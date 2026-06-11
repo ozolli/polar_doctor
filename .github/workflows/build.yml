@@ -20,7 +20,7 @@ jobs:
 
     steps:
     - name: Checkout code
-      uses: actions/checkout@v4
+      uses: actions/checkout@v6
 
     - name: Install dependencies
       run: |
@@ -55,7 +55,7 @@ jobs:
           BUILD.md
 
     - name: Upload artifact
-      uses: actions/upload-artifact@v4
+      uses: actions/upload-artifact@v7
       with:
         name: polar_doctor-linux-x64
         path: dist/polar_doctor-linux-x64.tar.gz
@@ -71,10 +71,10 @@ jobs:
 
     steps:
     - name: Checkout code
-      uses: actions/checkout@v4
+      uses: actions/checkout@v6
 
     - name: Set up QEMU for ARM64
-      uses: docker/setup-qemu-action@v3
+      uses: docker/setup-qemu-action@v4
       with:
         platforms: arm64
 
@@ -111,7 +111,7 @@ jobs:
           BUILD.md
 
     - name: Upload artifact
-      uses: actions/upload-artifact@v4
+      uses: actions/upload-artifact@v7
       with:
         name: polar_doctor-linux-arm64
         path: dist/polar_doctor-linux-arm64.tar.gz
@@ -126,7 +126,7 @@ jobs:
     continue-on-error: true
     steps:
     - name: Checkout code
-      uses: actions/checkout@v4
+      uses: actions/checkout@v6
     - name: Install dependencies
       run: brew install gtk+3 sqlite pkg-config
     - name: Build (x86_64)
@@ -136,7 +136,7 @@ jobs:
           -lm -lsqlite3 -Wall -O2
         file polar_doctor-x86_64
     - name: Upload slice
-      uses: actions/upload-artifact@v4
+      uses: actions/upload-artifact@v7
       with:
         name: macos-slice-x86_64
         path: polar_doctor-x86_64
@@ -149,7 +149,7 @@ jobs:
     continue-on-error: true
     steps:
     - name: Checkout code
-      uses: actions/checkout@v4
+      uses: actions/checkout@v6
     - name: Install dependencies
       run: brew install gtk+3 sqlite pkg-config
     - name: Build (arm64)
@@ -159,7 +159,7 @@ jobs:
           -lm -lsqlite3 -Wall -O2
         file polar_doctor-arm64
     - name: Upload slice
-      uses: actions/upload-artifact@v4
+      uses: actions/upload-artifact@v7
       with:
         name: macos-slice-arm64
         path: polar_doctor-arm64
@@ -173,14 +173,14 @@ jobs:
     continue-on-error: true
     steps:
     - name: Checkout code
-      uses: actions/checkout@v4
+      uses: actions/checkout@v6
     - name: Download x86_64 slice
-      uses: actions/download-artifact@v4
+      uses: actions/download-artifact@v8
       with:
         name: macos-slice-x86_64
         path: .
     - name: Download arm64 slice
-      uses: actions/download-artifact@v4
+      uses: actions/download-artifact@v8
       with:
         name: macos-slice-arm64
         path: .
@@ -200,7 +200,7 @@ jobs:
           README.md \
           BUILD.md
     - name: Upload artifact
-      uses: actions/upload-artifact@v4
+      uses: actions/upload-artifact@v7
       with:
         name: polar_doctor-macos-universal
         path: dist/polar_doctor-macos-universal.tar.gz
@@ -215,7 +215,7 @@ jobs:
 
     steps:
     - name: Checkout code
-      uses: actions/checkout@v4
+      uses: actions/checkout@v6
 
     - name: Setup MSYS2
       uses: msys2/setup-msys2@v2
@@ -290,7 +290,7 @@ jobs:
         EOF
 
     - name: Upload artifact
-      uses: actions/upload-artifact@v4
+      uses: actions/upload-artifact@v7
       with:
         name: polar_doctor-windows-x64
         path: polar_doctor_win/
@@ -304,30 +304,30 @@ jobs:
 
     steps:
     - name: Checkout code
-      uses: actions/checkout@v4
+      uses: actions/checkout@v6
 
     - name: Download Linux artifact
-      uses: actions/download-artifact@v4
+      uses: actions/download-artifact@v8
       with:
         name: polar_doctor-linux-x64
         path: ./artifacts
 
     - name: Download Linux ARM64 artifact
-      uses: actions/download-artifact@v4
+      uses: actions/download-artifact@v8
       continue-on-error: true  # ARM64 peut avoir échoué : ne bloque pas la release
       with:
         name: polar_doctor-linux-arm64
         path: ./artifacts
 
     - name: Download macOS artifact
-      uses: actions/download-artifact@v4
+      uses: actions/download-artifact@v8
       continue-on-error: true  # macOS peut avoir échoué/timeout : ne bloque pas la release
       with:
         name: polar_doctor-macos-universal
         path: ./artifacts
 
     - name: Download Windows artifact
-      uses: actions/download-artifact@v4
+      uses: actions/download-artifact@v8
       with:
         name: polar_doctor-windows-x64
         path: ./polar_doctor_win
@@ -349,7 +349,7 @@ jobs:
         cat SHA256SUMS.txt
 
     - name: Create Release
-      uses: softprops/action-gh-release@v2
+      uses: softprops/action-gh-release@v3
       with:
         files: |
           artifacts/polar_doctor-linux-x64.tar.gz
