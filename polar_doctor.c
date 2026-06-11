@@ -47,6 +47,17 @@
 #define PG_ANGLE_STEP 5
 #define PG_SPEED_STEP 2
 
+// Agrégation : percentile de la BSP retenu par cellule (90 = P90 par défaut).
+// Une polaire représente la performance atteignable : on vise le haut de la
+// distribution, pas la moyenne. Configurable (plage utile ~P85 à P95).
+#define DEFAULT_POLAR_PERCENTILE 90
+int g_polar_percentile = DEFAULT_POLAR_PERCENTILE;
+
+// Seuil RPM au-dessus duquel on considère le moteur en route (points exclus).
+// Le ralenti moteur est bien au-dessus ; ce seuil bas suffit à distinguer
+// voile (RPM nul/absent) de moteur, sans les perturbateurs de la gîte.
+#define ENGINE_RPM_THRESHOLD 150
+
 // Structures pour polar_generator
 typedef struct {
     double tws, twa, bsp;
@@ -109,6 +120,8 @@ typedef struct {
     GtkWidget *btn_add_tws;
     GtkWidget *btn_delete;
     GtkWidget *btn_help;
+    GtkWidget *percentile_spin;  // Percentile d'agrégation (génération/MAJ)
+    GtkWidget *percentile_label;
     // Labels pour traduction
     GtkWidget *tws_from_label;
     GtkWidget *tws_to_label;
@@ -160,6 +173,7 @@ void on_delete_clicked(GtkWidget *widget, gpointer user_data);
 gboolean on_header_clicked(GtkWidget *widget, GdkEventButton *event, gpointer user_data);
 void on_help_clicked(GtkWidget *widget, gpointer user_data);
 void on_lang_clicked(GtkWidget *widget, gpointer user_data);
+void on_percentile_changed(GtkWidget *widget, gpointer user_data);
 
 // ============================================================================
 // Dialogues de fichiers natifs Windows (évite les crashes GTK)
@@ -473,6 +487,38 @@ void add_data_point(polar_grid_t *grid, double twa, double tws, double bsp) {
     grid->point_count++;
 }
 
+// Agrège les BSP d'une cellule en retenant le percentile g_polar_percentile.
+// Garde-fou anti-bruit : minimum 3 points, sinon 0. Le percentile élevé ignore
+// naturellement le bas de distribution (faseyement, virements, ralentissements)
+// sans qu'on ait à le rogner explicitement.
+double aggregate_cell(data_point_t *head) {
+    int count = 0;
+    for (data_point_t *tmp = head; tmp; tmp = tmp->next) count++;
+    if (count < 3) return 0.0;
+
+    double *speeds = malloc(count * sizeof(double));
+    if (!speeds) return 0.0;
+
+    int i = 0;
+    for (data_point_t *tmp = head; tmp; tmp = tmp->next) speeds[i++] = tmp->bsp;
+
+    for (int a = 0; a < count - 1; a++)
+        for (int b = a + 1; b < count; b++)
+            if (speeds[a] > speeds[b]) {
+                double tmp = speeds[a]; speeds[a] = speeds[b]; speeds[b] = tmp;
+            }
+
+    // Percentile par interpolation linéaire entre les deux échantillons encadrants
+    double pos = (g_polar_percentile / 100.0) * (count - 1);
+    int lo = (int)pos;
+    double frac = pos - lo;
+    double result = (lo + 1 < count) ? speeds[lo] * (1.0 - frac) + speeds[lo + 1] * frac
+                                     : speeds[lo];
+
+    free(speeds);
+    return result;
+}
+
 double get_polar_value(polar_grid_t *grid, int angle, int speed) {
     if (angle < 0 || angle >= PG_MAX_ANGLES || speed < 0 || speed >= PG_MAX_SPEEDS) {
         return 0.0;
@@ -482,41 +528,7 @@ double get_polar_value(polar_grid_t *grid, int angle, int speed) {
         return grid->cached_polar[angle][speed];
     }
 
-    data_point_t *p = grid->points[angle][speed];
-    if (!p) return 0.0;
-
-    int count = 0;
-    for (data_point_t *tmp = p; tmp; tmp = tmp->next) count++;
-    if (count < 3) return 0.0;
-
-    double *speeds = malloc(count * sizeof(double));
-    if (!speeds) return 0.0;
-
-    int i = 0;
-    for (data_point_t *tmp = p; tmp; tmp = tmp->next) speeds[i++] = tmp->bsp;
-
-    for (int i = 0; i < count - 1; i++)
-        for (int j = i + 1; j < count; j++)
-            if (speeds[i] > speeds[j]) {
-                double tmp = speeds[i]; speeds[i] = speeds[j]; speeds[j] = tmp;
-            }
-
-    double result;
-    if (count >= 5) {
-        int trim = count / 5;
-        if (trim < 1) trim = 1;
-        double sum = 0;
-        int valid_count = 0;
-        for (int i = trim; i < count - trim; i++) { sum += speeds[i]; valid_count++; }
-        result = valid_count > 0 ? sum / valid_count : 0.0;
-    } else {
-        double sum = 0;
-        for (int i = 0; i < count; i++) sum += speeds[i];
-        result = sum / count;
-    }
-
-    free(speeds);
-    return result;
+    return aggregate_cell(grid->points[angle][speed]);
 }
 
 int process_nmea_file(const char *filename, polar_grid_t *grid, bool update_mode, ProgressContext *progress) {
@@ -563,6 +575,20 @@ int process_nmea_file(const char *filename, polar_grid_t *grid, bool update_mode
     return data_count;
 }
 
+// Indique si la table VDR possède une colonne donnée (le schéma varie selon l'export qtVlm)
+bool vdr_has_column(sqlite3 *db, const char *col) {
+    sqlite3_stmt *st;
+    bool found = false;
+    if (sqlite3_prepare_v2(db, "PRAGMA table_info(VDR);", -1, &st, NULL) == SQLITE_OK) {
+        while (sqlite3_step(st) == SQLITE_ROW) {
+            const unsigned char *name = sqlite3_column_text(st, 1);
+            if (name && strcasecmp((const char *)name, col) == 0) { found = true; break; }
+        }
+        sqlite3_finalize(st);
+    }
+    return found;
+}
+
 int process_vdr_file(const char *filename, polar_grid_t *grid, bool update_mode, ProgressContext *progress) {
     sqlite3 *db;
     sqlite3_stmt *stmt;
@@ -574,7 +600,19 @@ int process_vdr_file(const char *filename, polar_grid_t *grid, bool update_mode,
         return -1;
     }
 
-    const char *sql = "SELECT TWA, TWS, STW FROM VDR WHERE TWA IS NOT NULL AND TWS IS NOT NULL AND STW IS NOT NULL AND STW > 0;";
+    // Si une colonne RPM est présente, exclure les points moteur (RPM nul/absent = voile).
+    // Filtre d'état fiable, contrairement à la gîte (perturbée par vent faible, portant, multicoque).
+    char sql[512];
+    if (vdr_has_column(db, "RPM")) {
+        snprintf(sql, sizeof(sql),
+                 "SELECT TWA, TWS, STW FROM VDR WHERE TWA IS NOT NULL AND TWS IS NOT NULL "
+                 "AND STW IS NOT NULL AND STW > 0 AND (RPM IS NULL OR RPM < %d);",
+                 ENGINE_RPM_THRESHOLD);
+    } else {
+        snprintf(sql, sizeof(sql),
+                 "SELECT TWA, TWS, STW FROM VDR WHERE TWA IS NOT NULL AND TWS IS NOT NULL "
+                 "AND STW IS NOT NULL AND STW > 0;");
+    }
 
     rc = sqlite3_prepare_v2(db, sql, -1, &stmt, NULL);
     if (rc != SQLITE_OK) {
@@ -695,38 +733,7 @@ void compute_polar(polar_grid_t *grid, double result[PG_MAX_ANGLES][PG_MAX_SPEED
         }
 
         for (int speed = 0; speed < PG_MAX_SPEEDS; speed++) {
-            result[angle][speed] = 0.0;
-            data_point_t *p = grid->points[angle][speed];
-            if (!p) continue;
-
-            int count = 0;
-            for (data_point_t *tmp = p; tmp; tmp = tmp->next) count++;
-            if (count < 3) continue;
-
-            if (count >= 5) {
-                double *speeds = malloc(count * sizeof(double));
-                int i = 0;
-                for (data_point_t *tmp = p; tmp; tmp = tmp->next) speeds[i++] = tmp->bsp;
-
-                for (int i = 0; i < count - 1; i++)
-                    for (int j = i + 1; j < count; j++)
-                        if (speeds[i] > speeds[j]) {
-                            double tmp = speeds[i]; speeds[i] = speeds[j]; speeds[j] = tmp;
-                        }
-
-                int trim = count / 5;
-                if (trim < 1) trim = 1;
-                double sum = 0;
-                int valid_count = 0;
-                for (int i = trim; i < count - trim; i++) { sum += speeds[i]; valid_count++; }
-                result[angle][speed] = valid_count > 0 ? sum / valid_count : 0.0;
-                free(speeds);
-            } else {
-                double sum = 0;
-                for (data_point_t *tmp = p; tmp; tmp = tmp->next) sum += tmp->bsp;
-                result[angle][speed] = sum / count;
-            }
-
+            result[angle][speed] = aggregate_cell(grid->points[angle][speed]);
             grid->cached_polar[angle][speed] = result[angle][speed];
         }
     }
@@ -3491,6 +3498,23 @@ void create_main_window(AppWidgets *app) {
     GtkWidget *separator2 = gtk_separator_new(GTK_ORIENTATION_VERTICAL);
     gtk_box_pack_start(GTK_BOX(toolbar), separator2, FALSE, FALSE, 5);
 
+    // Contrôle du percentile d'agrégation (appliqué à la prochaine génération / mise à jour)
+    app->percentile_label = gtk_label_new(TR(app, "Percentile :", "Percentile:"));
+    gtk_box_pack_start(GTK_BOX(toolbar), app->percentile_label, FALSE, FALSE, 0);
+    app->percentile_spin = gtk_spin_button_new_with_range(85, 95, 1);
+    gtk_spin_button_set_value(GTK_SPIN_BUTTON(app->percentile_spin), g_polar_percentile);
+    gtk_widget_set_tooltip_text(app->percentile_spin,
+        TR(app, "Percentile de vitesse retenu par cellule lors de la génération/mise à jour "
+                "(plus haut = polaire plus ambitieuse). Prend effet à la prochaine génération.",
+               "Boat-speed percentile kept per cell when generating/updating "
+               "(higher = more aggressive polar). Takes effect on next generation."));
+    g_signal_connect(app->percentile_spin, "value-changed", G_CALLBACK(on_percentile_changed), app);
+    gtk_box_pack_start(GTK_BOX(toolbar), app->percentile_spin, FALSE, FALSE, 0);
+
+    // Séparateur
+    GtkWidget *separator3 = gtk_separator_new(GTK_ORIENTATION_VERTICAL);
+    gtk_box_pack_start(GTK_BOX(toolbar), separator3, FALSE, FALSE, 5);
+
     // Bouton Aide
     app->btn_help = gtk_button_new_with_label(TR(app, "Aide", "Help"));
     g_signal_connect(app->btn_help, "clicked", G_CALLBACK(on_help_clicked), app);
@@ -3539,6 +3563,11 @@ void on_lang_clicked(GtkWidget *widget, gpointer user_data) {
     update_interface_language(app);
 }
 
+void on_percentile_changed(GtkWidget *widget, gpointer user_data) {
+    (void)user_data;
+    g_polar_percentile = gtk_spin_button_get_value_as_int(GTK_SPIN_BUTTON(widget));
+}
+
 void update_interface_language(AppWidgets *app) {
     // Mettre à jour le titre de la fenêtre
     gtk_window_set_title(GTK_WINDOW(app->window),
@@ -3565,6 +3594,7 @@ void update_interface_language(AppWidgets *app) {
     gtk_button_set_label(GTK_BUTTON(app->btn_add_tws), TR(app, "Ajout TWS", "Add TWS"));
     gtk_button_set_label(GTK_BUTTON(app->btn_delete), TR(app, "Suppression", "Delete"));
     gtk_button_set_label(GTK_BUTTON(app->btn_help), TR(app, "Aide", "Help"));
+    gtk_label_set_text(GTK_LABEL(app->percentile_label), TR(app, "Percentile :", "Percentile:"));
 
     // Mettre à jour les labels TWS
     gtk_label_set_text(GTK_LABEL(app->tws_from_label), TR(app, "Voir les polaires pour les TWS de", "View polars for TWS from"));
