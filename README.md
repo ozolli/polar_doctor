@@ -14,8 +14,9 @@
 - ✅ Import de fichiers **NMEA** (.txt, .nmea, .log)
 - ✅ Import de bases **VDR SQLite** (.db) de qtVlm
 - ✅ Sélection multiple de fichiers
-- ✅ Agrégation statistique avec moyenne tronquée
+- ✅ Agrégation par **percentile configurable** (P85–P95, défaut P90) — vise la performance atteignable
 - ✅ Filtrage des données aberrantes
+- ✅ **Filtre moteur** automatique (exclut les points moteur via la colonne RPM des VDR, si présente)
 - ✅ Mode mise à jour (ne garde que les meilleures performances)
 
 ### Édition graphique
@@ -25,12 +26,19 @@
 - ✅ Visualisation polaire en temps réel
 - ✅ Interpolation Catmull-Rom pour courbes lisses
 - ✅ Sélection de plage TWS pour affichage
+- ✅ Couleur distincte par TWS + légende en mode multi-courbes
 
 ### Analyse VMG
 - ✅ Calcul automatique des meilleurs angles VMG
 - ✅ VMG upwind (près) et downwind (portant)
 - ✅ Tableau récapitulatif par vitesse de vent
-- ✅ Indicateurs visuels colorés
+- ✅ **Zones VMG matérialisées sur le diagramme** : vert = plage utile, rouge = près trop serré / portant trop bas
+
+### Mode dynamique (analyse interactive)
+- ✅ Courbe **interpolée** pour une TWS quelconque saisie au clavier (ex. 9,85 kn)
+- ✅ **Clic maintenu / glissé** sur le diagramme : ligne bleue qui suit le curseur (TWA au degré entier)
+- ✅ Lecture en direct **TWA / AWA / AWS / BS / VMG**
+- ✅ Au relâchement : vitesse max de la courbe et vitesse max absolue de la polaire
 
 ### Export et impression
 - ✅ **Export PDF** (données + diagramme + VMG)
@@ -224,8 +232,8 @@ polar_doctor.c           # Code source principal (130+ KB)
 │   └── AppWidgets      # Interface GTK
 ├── Moteur de calcul
 │   ├── NMEA parser     # Lecture sentences
-│   ├── VDR reader      # Lecture SQLite
-│   ├── Agrégation      # Moyennes tronquées
+│   ├── VDR reader      # Lecture SQLite (+ filtre RPM)
+│   ├── Agrégation      # Percentile (P90)
 │   └── VMG calculator  # Angles optimaux
 ├── Interface GTK
 │   ├── Éditeur tableau
@@ -279,8 +287,8 @@ Développé avec ❤️ pour la communauté nautique
 
 ## 📈 Statistiques
 
-- **Lignes de code :** ~3500
-- **Fonctions :** 80+
+- **Lignes de code :** ~4100
+- **Fonctions :** 90+
 - **Formats supportés :** 3 (NMEA, VDR, POL)
 - **Langues :** 2 (FR, EN)
 - **Plateformes :** Linux, Windows, macOS

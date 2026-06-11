@@ -2,6 +2,32 @@
 
 Toutes les modifications notables du projet seront documentées dans ce fichier.
 
+## [1.1.0] - 2026-06-11
+
+### Ajouté
+- ✅ **Mode dynamique** du diagramme (façon qtVlm) : case à cocher activant l'analyse interactive
+  - Champ TWS libre (boutons ± de 1 kn, décimales saisissables au clavier, ex. 9,85)
+  - Affichage de la seule **courbe interpolée** (bilinéaire) pour la TWS saisie
+  - **Clic gauche maintenu / glissé** sur le diagramme : ligne bleue suivant le curseur (TWA au degré entier)
+  - Lecture en direct **TWA / AWA / AWS / BS / VMG** pendant le glissé
+  - Au relâchement : résumé **vitesse max de la courbe** (+ TWA) et **vitesse max absolue** de la polaire (+ TWS/TWA)
+- ✅ **Coloration des zones VMG** sur les courbes (modes dynamique et multi-courbes)
+  - Vert (ou couleur de la TWS) sur la plage VMG utile, **rouge** hors plage (près trop serré / portant trop bas)
+  - Transition placée exactement aux angles VMG optimaux, cohérente avec le tableau VMG
+- ✅ **Couleurs distinctes par TWS** + **légende colorée** en mode multi-courbes
+- ✅ **Curseur de percentile** dans la barre d'outils (P85–P95) pour régler l'agrégation
+- ✅ **Filtre moteur** à l'import VDR : exclusion automatique des points avec RPM moteur en route
+  (détection de la colonne RPM ; sans perturbateur, contrairement à la gîte)
+
+### Modifié
+- 🔄 **Agrégation par percentile** (P90 par défaut) au lieu de la moyenne tronquée :
+  une polaire vise la performance atteignable, on cesse de rejeter le haut de distribution
+  (gain mesuré ~6–7 % en moyenne, jusqu'à ~20 % sur les cellules bien documentées)
+- 🔄 Les polaires générées depuis des données incluent désormais toujours la colonne TWS 0 (conformité .pol/.csv)
+
+### Corrigé
+- 🐛 Index par défaut du sélecteur TWS « à » hors limites pour les polaires de ≤ 6 vitesses réelles
+
 ## [1.0.1] - 2025-10-09
 
 ### Corrigé
