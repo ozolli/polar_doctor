@@ -82,6 +82,95 @@ int g_polar_percentile = DEFAULT_POLAR_PERCENTILE;
 #define STW_SOG_ALPHA 0.1       // poids EMA : delta s'adapte sur ~1/alpha points
 #define STW_SOG_GAP_RESET 1800  // s : au-delà d'un tel trou, on ré-amorce delta
 
+// ---- Configuration du bateau (inventaire voiles / états de mer + mots-clés moteur) ----
+// Pas de système canonique+alias : chaque entrée est UN terme choisi par l'utilisateur,
+// recherché tel quel (insensible à la casse, en sous-chaîne) dans les commentaires.
+// Voiles séparées en grand-voile (états : haute, 1 ris…) et voiles d'avant.
+#define BOAT_MAX_ITEMS 32
+#define BOAT_TERM_LEN  48
+
+typedef struct {
+    char name[128];
+    char mainsail[BOAT_MAX_ITEMS][BOAT_TERM_LEN]; int n_mainsail;  // états de grand-voile
+    char headsail[BOAT_MAX_ITEMS][BOAT_TERM_LEN]; int n_headsail;  // voiles d'avant
+    char seastate[BOAT_MAX_ITEMS][BOAT_TERM_LEN]; int n_seastate;  // états de mer
+    char kw_moteur[BOAT_TERM_LEN];   // moteur embrayé -> exclure
+    char kw_charge[BOAT_TERM_LEN];   // charge batteries débrayé -> garder
+} BoatConfig;
+
+BoatConfig g_boat_config;
+
+static void boat_config_init(BoatConfig *c) {
+    memset(c, 0, sizeof(*c));
+    snprintf(c->kw_moteur, BOAT_TERM_LEN, "Moteur");
+    snprintf(c->kw_charge, BOAT_TERM_LEN, "Charge");
+}
+
+// Rogne les espaces de début/fin, en place.
+static char *boat_str_trim(char *s) {
+    while (*s && isspace((unsigned char)*s)) s++;
+    if (*s == 0) return s;
+    char *end = s + strlen(s) - 1;
+    while (end > s && isspace((unsigned char)*end)) *end-- = 0;
+    return s;
+}
+
+static void boat_list_add(char list[][BOAT_TERM_LEN], int *n, const char *term) {
+    if (*n >= BOAT_MAX_ITEMS || !term || !*term) return;
+    snprintf(list[*n], BOAT_TERM_LEN, "%s", term);
+    (*n)++;
+}
+
+// Charge un boat.cfg (format INI). true si le fichier a pu être lu.
+static bool boat_config_load(BoatConfig *c, const char *path) {
+    FILE *f = fopen(path, "r");
+    if (!f) return false;
+    boat_config_init(c);
+    char line[256], section[32] = "";
+    while (fgets(line, sizeof(line), f)) {
+        char *p = boat_str_trim(line);
+        if (*p == 0 || *p == '#' || *p == ';') continue;
+        if (*p == '[') {
+            char *end = strchr(p, ']');
+            if (end) { *end = 0; snprintf(section, sizeof(section), "%s", p + 1); }
+            continue;
+        }
+        if (strcmp(section, "boat") == 0 || strcmp(section, "engine") == 0) {
+            char *eq = strchr(p, '=');
+            if (!eq) continue;
+            *eq = 0;
+            char *k = boat_str_trim(p), *v = boat_str_trim(eq + 1);
+            if (strcmp(section, "boat") == 0 && strcmp(k, "name") == 0)
+                snprintf(c->name, sizeof(c->name), "%s", v);
+            else if (strcmp(k, "moteur") == 0) snprintf(c->kw_moteur, BOAT_TERM_LEN, "%s", v);
+            else if (strcmp(k, "charge") == 0) snprintf(c->kw_charge, BOAT_TERM_LEN, "%s", v);
+        } else if (strcmp(section, "mainsail") == 0) {
+            boat_list_add(c->mainsail, &c->n_mainsail, p);
+        } else if (strcmp(section, "headsails") == 0) {
+            boat_list_add(c->headsail, &c->n_headsail, p);
+        } else if (strcmp(section, "seastates") == 0) {
+            boat_list_add(c->seastate, &c->n_seastate, p);
+        }
+    }
+    fclose(f);
+    return true;
+}
+
+static bool boat_config_save(const BoatConfig *c, const char *path) {
+    FILE *f = fopen(path, "w");
+    if (!f) return false;
+    fprintf(f, "[boat]\nname = %s\n\n", c->name);
+    fprintf(f, "[mainsail]            ; états de grand-voile (un terme par ligne)\n");
+    for (int i = 0; i < c->n_mainsail; i++) fprintf(f, "%s\n", c->mainsail[i]);
+    fprintf(f, "\n[headsails]           ; voiles d'avant\n");
+    for (int i = 0; i < c->n_headsail; i++) fprintf(f, "%s\n", c->headsail[i]);
+    fprintf(f, "\n[seastates]           ; états de mer\n");
+    for (int i = 0; i < c->n_seastate; i++) fprintf(f, "%s\n", c->seastate[i]);
+    fprintf(f, "\n[engine]\nmoteur = %s\ncharge = %s\n", c->kw_moteur, c->kw_charge);
+    fclose(f);
+    return true;
+}
+
 // Structures pour polar_generator
 typedef struct {
     double tws, twa, bsp;
@@ -164,6 +253,7 @@ typedef struct {
     GtkWidget *btn_add_twa;
     GtkWidget *btn_add_tws;
     GtkWidget *btn_delete;
+    GtkWidget *btn_boat;   // Configuration du bateau (inventaire voiles / mer)
     GtkWidget *btn_help;
     GtkWidget *percentile_spin;  // Percentile d'agrégation (génération/MAJ)
     GtkWidget *percentile_label;
@@ -227,6 +317,7 @@ void on_add_tws_clicked(GtkWidget *widget, gpointer user_data);
 void on_delete_clicked(GtkWidget *widget, gpointer user_data);
 gboolean on_header_clicked(GtkWidget *widget, GdkEventButton *event, gpointer user_data);
 void on_help_clicked(GtkWidget *widget, gpointer user_data);
+void on_boat_config_clicked(GtkWidget *widget, gpointer user_data);
 void on_lang_clicked(GtkWidget *widget, gpointer user_data);
 void on_percentile_changed(GtkWidget *widget, gpointer user_data);
 void on_dynamic_toggled(GtkWidget *widget, gpointer user_data);
@@ -4006,6 +4097,16 @@ void create_main_window(AppWidgets *app) {
     GtkWidget *separator3 = gtk_separator_new(GTK_ORIENTATION_VERTICAL);
     gtk_box_pack_start(GTK_BOX(toolbar), separator3, FALSE, FALSE, 5);
 
+    // Bouton Configuration du bateau (inventaire voiles / états de mer)
+    app->btn_boat = gtk_button_new_with_label(TR(app, "Bateau…", "Boat…"));
+    gtk_widget_set_tooltip_text(app->btn_boat,
+        TR(app, "Configurer l'inventaire du bateau : grand-voile, voiles d'avant, "
+                "états de mer, mots-clés moteur.",
+               "Configure the boat inventory: mainsail, headsails, sea states, "
+               "engine keywords."));
+    g_signal_connect(app->btn_boat, "clicked", G_CALLBACK(on_boat_config_clicked), app);
+    gtk_box_pack_start(GTK_BOX(toolbar), app->btn_boat, FALSE, FALSE, 0);
+
     // Bouton Aide
     app->btn_help = gtk_button_new_with_label(TR(app, "Aide", "Help"));
     g_signal_connect(app->btn_help, "clicked", G_CALLBACK(on_help_clicked), app);
@@ -4330,6 +4431,147 @@ void on_help_clicked(GtkWidget *widget, gpointer user_data) {
     gtk_widget_destroy(dialog);
 }
 
+// --- Éditeur GUI de la configuration du bateau ---
+static void boat_textview_set(GtkTextView *tv, char list[][BOAT_TERM_LEN], int n) {
+    GString *s = g_string_new("");
+    for (int i = 0; i < n; i++) { g_string_append(s, list[i]); g_string_append_c(s, '\n'); }
+    gtk_text_buffer_set_text(gtk_text_view_get_buffer(tv), s->str, -1);
+    g_string_free(s, TRUE);
+}
+
+static int boat_textview_get(GtkTextView *tv, char list[][BOAT_TERM_LEN]) {
+    GtkTextBuffer *buf = gtk_text_view_get_buffer(tv);
+    GtkTextIter a, b;
+    gtk_text_buffer_get_bounds(buf, &a, &b);
+    char *txt = gtk_text_buffer_get_text(buf, &a, &b, FALSE);
+    int n = 0;
+    char *save = NULL;
+    for (char *line = strtok_r(txt, "\n", &save); line && n < BOAT_MAX_ITEMS;
+         line = strtok_r(NULL, "\n", &save)) {
+        char *t = boat_str_trim(line);
+        if (*t) { snprintf(list[n], BOAT_TERM_LEN, "%s", t); n++; }
+    }
+    g_free(txt);
+    return n;
+}
+
+static GtkWidget *boat_make_list_editor(const char *title, GtkWidget **out_tv) {
+    GtkWidget *frame = gtk_frame_new(title);
+    GtkWidget *sw = gtk_scrolled_window_new(NULL, NULL);
+    gtk_scrolled_window_set_policy(GTK_SCROLLED_WINDOW(sw), GTK_POLICY_AUTOMATIC, GTK_POLICY_AUTOMATIC);
+    gtk_widget_set_size_request(sw, 180, 150);
+    GtkWidget *tv = gtk_text_view_new();
+    gtk_container_add(GTK_CONTAINER(sw), tv);
+    gtk_container_add(GTK_CONTAINER(frame), sw);
+    *out_tv = tv;
+    return frame;
+}
+
+// Recopie les champs du dialogue dans g_boat_config (édition de session).
+static void boat_dialog_collect(GtkWidget *name_e, GtkWidget *mot_e, GtkWidget *chg_e,
+                                GtkTextView *tv_main, GtkTextView *tv_head, GtkTextView *tv_sea) {
+    snprintf(g_boat_config.name, sizeof(g_boat_config.name), "%s", gtk_entry_get_text(GTK_ENTRY(name_e)));
+    snprintf(g_boat_config.kw_moteur, BOAT_TERM_LEN, "%s", gtk_entry_get_text(GTK_ENTRY(mot_e)));
+    snprintf(g_boat_config.kw_charge, BOAT_TERM_LEN, "%s", gtk_entry_get_text(GTK_ENTRY(chg_e)));
+    g_boat_config.n_mainsail = boat_textview_get(tv_main, g_boat_config.mainsail);
+    g_boat_config.n_headsail = boat_textview_get(tv_head, g_boat_config.headsail);
+    g_boat_config.n_seastate = boat_textview_get(tv_sea,  g_boat_config.seastate);
+}
+
+void on_boat_config_clicked(GtkWidget *widget, gpointer user_data) {
+    (void)widget;
+    AppWidgets *app = (AppWidgets *)user_data;
+
+    GtkWidget *dialog = gtk_dialog_new_with_buttons(
+        TR(app, "Configuration du bateau", "Boat configuration"),
+        GTK_WINDOW(app->window), GTK_DIALOG_MODAL | GTK_DIALOG_DESTROY_WITH_PARENT,
+        TR(app, "Charger…", "Load…"), 1,
+        TR(app, "Enregistrer…", "Save…"), 2,
+        TR(app, "Fermer", "Close"), GTK_RESPONSE_CLOSE,
+        NULL);
+    gtk_window_set_default_size(GTK_WINDOW(dialog), 660, 470);
+    GtkWidget *content = gtk_dialog_get_content_area(GTK_DIALOG(dialog));
+    gtk_box_set_spacing(GTK_BOX(content), 6);
+
+    GtkWidget *name_box = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 6);
+    gtk_box_pack_start(GTK_BOX(name_box),
+        gtk_label_new(TR(app, "Nom du bateau :", "Boat name:")), FALSE, FALSE, 0);
+    GtkWidget *name_entry = gtk_entry_new();
+    gtk_entry_set_text(GTK_ENTRY(name_entry), g_boat_config.name);
+    gtk_box_pack_start(GTK_BOX(name_box), name_entry, TRUE, TRUE, 0);
+    gtk_box_pack_start(GTK_BOX(content), name_box, FALSE, FALSE, 0);
+
+    GtkWidget *lists = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 6);
+    GtkWidget *tv_main, *tv_head, *tv_sea;
+    gtk_box_pack_start(GTK_BOX(lists),
+        boat_make_list_editor(TR(app, "Grand-voile (états)", "Mainsail (states)"), &tv_main), TRUE, TRUE, 0);
+    gtk_box_pack_start(GTK_BOX(lists),
+        boat_make_list_editor(TR(app, "Voiles d'avant", "Headsails"), &tv_head), TRUE, TRUE, 0);
+    gtk_box_pack_start(GTK_BOX(lists),
+        boat_make_list_editor(TR(app, "États de mer", "Sea states"), &tv_sea), TRUE, TRUE, 0);
+    gtk_box_pack_start(GTK_BOX(content), lists, TRUE, TRUE, 0);
+
+    GtkWidget *hint = gtk_label_new(
+        TR(app, "Un terme par ligne, tel qu'écrit dans les commentaires (un tag voile termine le mode moteur).",
+               "One term per line, as written in the comments (a sail tag ends engine mode)."));
+    gtk_label_set_xalign(GTK_LABEL(hint), 0.0);
+    gtk_box_pack_start(GTK_BOX(content), hint, FALSE, FALSE, 0);
+
+    GtkWidget *eng = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 6);
+    gtk_box_pack_start(GTK_BOX(eng), gtk_label_new(TR(app, "Moteur :", "Engine:")), FALSE, FALSE, 0);
+    GtkWidget *mot_entry = gtk_entry_new();
+    gtk_entry_set_text(GTK_ENTRY(mot_entry), g_boat_config.kw_moteur);
+    gtk_box_pack_start(GTK_BOX(eng), mot_entry, TRUE, TRUE, 0);
+    gtk_box_pack_start(GTK_BOX(eng), gtk_label_new(TR(app, "Charge :", "Charge:")), FALSE, FALSE, 0);
+    GtkWidget *chg_entry = gtk_entry_new();
+    gtk_entry_set_text(GTK_ENTRY(chg_entry), g_boat_config.kw_charge);
+    gtk_box_pack_start(GTK_BOX(eng), chg_entry, TRUE, TRUE, 0);
+    gtk_box_pack_start(GTK_BOX(content), eng, FALSE, FALSE, 0);
+
+    boat_textview_set(GTK_TEXT_VIEW(tv_main), g_boat_config.mainsail, g_boat_config.n_mainsail);
+    boat_textview_set(GTK_TEXT_VIEW(tv_head), g_boat_config.headsail, g_boat_config.n_headsail);
+    boat_textview_set(GTK_TEXT_VIEW(tv_sea),  g_boat_config.seastate, g_boat_config.n_seastate);
+
+    gtk_widget_show_all(dialog);
+
+    int resp;
+    while ((resp = gtk_dialog_run(GTK_DIALOG(dialog))) == 1 || resp == 2) {
+        boat_dialog_collect(name_entry, mot_entry, chg_entry,
+                            GTK_TEXT_VIEW(tv_main), GTK_TEXT_VIEW(tv_head), GTK_TEXT_VIEW(tv_sea));
+
+        GtkFileChooserAction action = (resp == 2) ? GTK_FILE_CHOOSER_ACTION_SAVE
+                                                  : GTK_FILE_CHOOSER_ACTION_OPEN;
+        GtkWidget *fc = gtk_file_chooser_dialog_new(
+            (resp == 2) ? TR(app, "Enregistrer boat.cfg", "Save boat.cfg")
+                        : TR(app, "Charger boat.cfg", "Load boat.cfg"),
+            GTK_WINDOW(dialog), action,
+            TR(app, "_Annuler", "_Cancel"), GTK_RESPONSE_CANCEL,
+            (resp == 2) ? TR(app, "_Enregistrer", "_Save") : TR(app, "_Ouvrir", "_Open"),
+            GTK_RESPONSE_ACCEPT, NULL);
+        if (resp == 2)
+            gtk_file_chooser_set_current_name(GTK_FILE_CHOOSER(fc), "boat.cfg");
+        if (gtk_dialog_run(GTK_DIALOG(fc)) == GTK_RESPONSE_ACCEPT) {
+            char *path = gtk_file_chooser_get_filename(GTK_FILE_CHOOSER(fc));
+            if (path && resp == 2) {
+                boat_config_save(&g_boat_config, path);
+            } else if (path && boat_config_load(&g_boat_config, path)) {
+                gtk_entry_set_text(GTK_ENTRY(name_entry), g_boat_config.name);
+                gtk_entry_set_text(GTK_ENTRY(mot_entry), g_boat_config.kw_moteur);
+                gtk_entry_set_text(GTK_ENTRY(chg_entry), g_boat_config.kw_charge);
+                boat_textview_set(GTK_TEXT_VIEW(tv_main), g_boat_config.mainsail, g_boat_config.n_mainsail);
+                boat_textview_set(GTK_TEXT_VIEW(tv_head), g_boat_config.headsail, g_boat_config.n_headsail);
+                boat_textview_set(GTK_TEXT_VIEW(tv_sea),  g_boat_config.seastate, g_boat_config.n_seastate);
+            }
+            g_free(path);
+        }
+        gtk_widget_destroy(fc);
+    }
+
+    boat_dialog_collect(name_entry, mot_entry, chg_entry,
+                        GTK_TEXT_VIEW(tv_main), GTK_TEXT_VIEW(tv_head), GTK_TEXT_VIEW(tv_sea));
+    gtk_widget_destroy(dialog);
+}
+
 int main(int argc, char *argv[]) {
     // Fix pour Windows - désactive les portails GTK qui peuvent causer des crashes
     #ifdef _WIN32
@@ -4356,6 +4598,7 @@ int main(int argc, char *argv[]) {
     app.dynamic_mode = FALSE;
     app.dragging = FALSE;
     app.drag_twa = 0.0;
+    boat_config_init(&g_boat_config);
 
     create_main_window(&app);
 
