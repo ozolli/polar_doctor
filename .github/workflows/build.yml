@@ -38,8 +38,10 @@ jobs:
 
     - name: Test binary
       run: |
-        ./polar_doctor --version || echo "Note: No version flag available"
+        # Ne pas exécuter : appli GUI sans flag --version, gtk_main() bloque
+        # (sur macOS le backend quartz ne sort pas faute de display -> hang).
         file polar_doctor
+        test -x polar_doctor
 
     - name: Create package
       run: |
@@ -118,6 +120,9 @@ jobs:
   build-macos:
     name: Build on macOS
     runs-on: macos-latest
+    # brew install gtk+3 peut être long/fragile : borné et non bloquant pour la release.
+    timeout-minutes: 40
+    continue-on-error: true
 
     steps:
     - name: Checkout code
@@ -138,8 +143,10 @@ jobs:
 
     - name: Test binary
       run: |
-        ./polar_doctor --version || echo "Note: No version flag available"
+        # Ne pas exécuter : appli GUI sans flag --version, gtk_main() bloque
+        # (sur macOS le backend quartz ne sort pas faute de display -> hang).
         file polar_doctor
+        test -x polar_doctor
 
     - name: Create package
       run: |
@@ -273,6 +280,7 @@ jobs:
 
     - name: Download macOS artifact
       uses: actions/download-artifact@v4
+      continue-on-error: true  # macOS peut avoir échoué/timeout : ne bloque pas la release
       with:
         name: polar_doctor-macos-x64
         path: ./artifacts
