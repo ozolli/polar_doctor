@@ -341,6 +341,20 @@ bool comment_has_keyword(const char *comment, const char *keyword) {
     return false;
 }
 
+// Le commentaire mentionne-t-il une voile de l'inventaire (GV ou voile d'avant) ?
+// Poser une voile signifie « reparti à la voile » -> termine le mode moteur.
+static bool comment_is_sail(const BoatConfig *c, const char *comment) {
+    if (!comment) return false;
+    for (int i = 0; i < c->n_headsail; i++)
+        if (comment_has_keyword(comment, c->headsail[i])) return true;
+    for (int i = 0; i < c->n_mainsail; i++)
+        if (comment_has_keyword(comment, c->mainsail[i])) return true;
+    return false;
+}
+
+// État moteur déduit des commentaires (mots-clés du bateau) + RPM.
+typedef enum { ENG_SAILING, ENG_CHARGING, ENG_MOTORING } engine_state_t;
+
 int process_vdr_file(const char *filename, polar_grid_t *grid, bool update_mode, ProgressContext *progress) {
     sqlite3 *db;
     sqlite3_stmt *stmt;
@@ -378,7 +392,7 @@ int process_vdr_file(const char *filename, polar_grid_t *grid, bool update_mode,
     }
 
     int data_count = 0, filtered_count = 0;
-    bool charging = false;  // moteur débrayé en charge : court jusqu'au prochain RPM = 0
+    engine_state_t engine = ENG_SAILING;  // forward-fill : voile / charge débrayée / moteur embrayé
     stw_sog_filter_t stwf;  // débruitage STW via SOG (offset courant suivi)
     stw_sog_reset(&stwf);
     long prev_time = 0;
@@ -396,12 +410,20 @@ int process_vdr_file(const char *filename, polar_grid_t *grid, bool update_mode,
         double sog = has_sog_val ? sqlite3_column_double(stmt, 5) : 0.0;
         long t = (long)sqlite3_column_int64(stmt, 6);
 
-        // Mise à jour de l'état moteur (forward-fill) AVANT le test d'exclusion.
-        if (comment_has_keyword(comment, VDR_COMMENT_CHARGING)) charging = true;
-        if (rpm <= 0.0) charging = false;  // fin de session moteur : on referme la fenêtre
+        // Machine d'état moteur (forward-fill), pilotée par les mots-clés du bateau.
+        // Charge = moteur débrayé (on garde) ; Moteur = embrayé (on exclut) ; une voile
+        // posée = reparti à la voile (fin du mode moteur). Sans colonne RPM, le mode
+        // Moteur ne se referme QUE sur un tag voile ; avec RPM, un RPM = 0 le referme aussi.
+        if (comment) {
+            if (comment_has_keyword(comment, g_boat_config.kw_charge))      engine = ENG_CHARGING;
+            else if (comment_has_keyword(comment, g_boat_config.kw_moteur)) engine = ENG_MOTORING;
+            else if (comment_is_sail(&g_boat_config, comment))             engine = ENG_SAILING;
+        }
+        if (has_rpm && rpm <= 0.0) engine = ENG_SAILING;  // moteur coupé -> fin de session
 
-        // RPM > 0 et pas en charge débrayée -> moteur embrayé : point écarté.
-        if (rpm > 0.0 && !charging) {
+        // Exclusion : moteur embrayé (tag Moteur), ou RPM > 0 sans annotation de charge.
+        bool engine_on = has_rpm && rpm > 0.0;
+        if (engine == ENG_MOTORING || (engine_on && engine != ENG_CHARGING)) {
             filtered_count++;
             continue;
         }

@@ -54,7 +54,7 @@
 extern int g_polar_percentile;
 
 // Moteur : RPM > 0 = moteur en route -> exclu, SAUF commentaire de charge (débrayé).
-#define VDR_COMMENT_CHARGING "Charge"
+// Les mots-clés Moteur/Charge sont configurables par bateau (g_boat_config).
 
 // Lissage glissant à l'import NMEA (moyenne mobile sur N points complets).
 #define NMEA_SMOOTH_WINDOW 10
