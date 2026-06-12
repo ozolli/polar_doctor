@@ -2,6 +2,13 @@
 
 Toutes les modifications notables du projet seront documentées dans ce fichier.
 
+## [1.2.1] - 2026-06-12
+
+### Corrigé
+- 🐛 **[Windows]** Le bouton de langue affichait « FR » / « GB » au lieu des drapeaux —
+  Windows (Segoe UI Emoji) ne rend pas les emojis-drapeaux. Remplacé par un petit drapeau
+  dessiné en Cairo (tricolore / Union Jack), identique sur Linux, macOS et Windows.
+
 ## [1.2.0] - 2026-06-12
 
 ### Ajouté
