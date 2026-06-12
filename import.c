@@ -342,13 +342,26 @@ bool vdr_has_column(sqlite3 *db, const char *col) {
     return found;
 }
 
-// Recherche insensible à la casse d'un mot-clé dans un commentaire VDR libre.
+// Normalise pour comparaison tolérante : translittère les accents en ASCII
+// (é->e, ç->c…) puis passe en minuscules. À libérer avec g_free().
+static char *kw_normalize(const char *s) {
+    char *ascii = g_str_to_ascii(s, NULL);   // « Très forte » -> « Tres forte »
+    char *down = g_ascii_strdown(ascii, -1);
+    g_free(ascii);
+    return down;
+}
+
+// Le commentaire contient-il le mot-clé ? Insensible à la casse ET aux accents
+// (français), en sous-chaîne — ce qui gère aussi les commentaires accolés (« GVJ1 »
+// contient « GV » et « J1 »).
 bool comment_has_keyword(const char *comment, const char *keyword) {
     if (!comment || !keyword || !*keyword) return false;
-    size_t klen = strlen(keyword);
-    for (const char *p = comment; *p; p++)
-        if (strncasecmp(p, keyword, klen) == 0) return true;
-    return false;
+    char *c = kw_normalize(comment);
+    char *k = kw_normalize(keyword);
+    bool found = (*k && strstr(c, k) != NULL);
+    g_free(c);
+    g_free(k);
+    return found;
 }
 
 // Le commentaire mentionne-t-il une voile de l'inventaire (GV ou voile d'avant) ?
