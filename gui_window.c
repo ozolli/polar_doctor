@@ -49,8 +49,8 @@ static int create_routed_polars(AppWidgets *app, GSList *filenames, ProgressCont
 }
 
 // Met à jour les polaires existantes du bateau : pour chaque <nom>.pol présent, on
-// réensemence sa grille (baseline), on route les nouveaux points (≥95 % par polaire),
-// on recalcule et on réécrit le .pol. Renvoie le nb de polaires mises à jour.
+// ré-injecte ses points existants, route les nouveaux points, ré-agrège au percentile
+// (la polaire peut monter ou baisser) et réécrit le .pol. Renvoie le nb mises à jour.
 static int update_routed_polars(AppWidgets *app, GSList *filenames, ProgressContext *progress) {
     int n = g_boat_config.n_polars;
     char *folder = g_path_get_dirname(g_boat_config_path);
@@ -1279,7 +1279,8 @@ void on_help_clicked(GtkWidget *widget, gpointer user_data) {
         "  Met à jour la polaire actuelle avec de nouvelles données NMEA/VDR\n"
         "  - Sélection multiple possible\n"
         "  - Seules les performances égales ou supérieures sont conservées\n"
-        "  - Les données inférieures à 95% de l'existant sont filtrées\n\n"
+        "  - Données existantes et nouvelles ré-agrégées au percentile (la polaire peut monter OU baisser,\n"
+        "    utile pour adapter une polaire théorique VPP au bateau réel)\n\n"
         "<b>• Export PDF</b>\n"
         "  Exporte la polaire (tableau de données + diagramme + VMG) au format PDF\n"
         "  - Le nom du fichier est automatiquement suggéré (basé sur le nom de la polaire)\n"
@@ -1370,7 +1371,8 @@ void on_help_clicked(GtkWidget *widget, gpointer user_data) {
         "  Update the current polar with new NMEA/VDR data\n"
         "  - Multiple selection possible\n"
         "  - Only equal or better performances are kept\n"
-        "  - Data below 95% of existing values is filtered\n\n"
+        "  - Existing and new data re-aggregated at the percentile (the polar can rise OR fall,\n"
+        "    handy to adapt a theoretical VPP polar to the real boat)\n\n"
         "<b>• Export PDF</b>\n"
         "  Export the polar (data table + diagram + VMG) to PDF format\n"
         "  - Filename is automatically suggested (based on polar name)\n"

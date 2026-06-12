@@ -19,7 +19,18 @@
 - ✅ **Débruitage du STW par le SOG** : les sauts du loch (coque déjaugée, roue à aube bloquée)
   sont rejetés, un courant lent est préservé
 - ✅ **Filtre moteur** : points moteur (RPM > 0) exclus, **sauf charge batteries** (commentaire `Charge` du VDR, moteur débrayé)
-- ✅ Mode mise à jour (ne garde que les meilleures performances)
+- ✅ Mode mise à jour : ré-agrège l'existant + les nouvelles données au percentile (la polaire peut monter ou baisser)
+
+### Mode bateau (multi-polaires)
+- ⛵ Un **bateau = un dossier** (config `boat.cfg` ou `<nom>.cfg` + ses polaires `.pol`)
+- ✅ Bouton **Ouvrir ▾** : liste des **bateaux récents** + parcourir un bateau / ouvrir une polaire seule
+- ✅ Bouton **Nouveau bateau** ; bouton **Bateau…** pour éditer l'inventaire
+- ✅ **Inventaire** par bateau : grand-voile, voiles d'avant, **états de mer (échelle Douglas)**, mots-clés moteur
+- ✅ **Polaires multiples** : définir N polaires et leurs critères (voiles × états de mer) par **cases à cocher**
+- ✅ **Routage automatique** à l'import : chaque point va dans les polaires dont les critères correspondent
+  (état voile/mer suivi via les commentaires VDR) → un `.pol` par polaire
+- ✅ **Sélecteur de polaire** pour basculer entre les polaires du bateau
+- ✅ Filtre moteur configurable (`Moteur`/`Charge`) ; commentaires tolérants casse/accents et accolés (`GVJ1`)
 
 ### Édition graphique
 - ✅ Tableau de données éditable (double-clic)
@@ -101,7 +112,7 @@ Consultez [BUILD.md](BUILD.md) pour les instructions détaillées pour :
 1. Ouvrir une polaire (.pol)
 2. Cliquer sur **"Mettre à jour"**
 3. Sélectionner de nouveaux fichiers de données
-4. Seules les performances égales ou meilleures sont conservées
+4. L'existant et les nouvelles données sont ré-agrégés au percentile (la polaire s'ajuste au réel, à la hausse comme à la baisse)
 
 ### 3. Éditer manuellement
 

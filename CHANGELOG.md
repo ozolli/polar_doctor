@@ -2,6 +2,31 @@
 
 Toutes les modifications notables du projet seront documentées dans ce fichier.
 
+## [1.3.0] - 2026-06-12
+
+### Ajouté
+- ✅ **Mode bateau** : un bateau = un **dossier** (config + polaires). Bouton « Ouvrir ▾ »
+  → menu des **bateaux récents** + « Parcourir un bateau… » ; bouton « **Nouveau bateau** ».
+  Config nommée `boat.cfg` ou `<nom>.cfg` (détection automatique).
+- ✅ **Inventaire du bateau** (dialogue « Bateau… ») éditable graphiquement et enregistré
+  en `boat.cfg` (INI) : grand-voile, voiles d'avant, états de mer, mots-clés moteur.
+- ✅ **États de mer = échelle Douglas/OMM** par défaut (Calme → Énorme), libellés FR/EN, éditable.
+- ✅ **Polaires multiples par bateau** : définir N polaires et, pour chacune, les voiles
+  (GV / voile d'avant) et états de mer concernés via un **pop-up à cases à cocher**. À la
+  génération/mise à jour, chaque point est **routé** vers les polaires dont les critères
+  correspondent (état voile/mer suivi via les commentaires) → **un `<nom>.pol` par polaire**.
+- ✅ **Sélecteur de polaire** dans la barre d'outils pour basculer entre les polaires d'un bateau.
+
+### Modifié
+- 🔄 **Filtre moteur configurable** par bateau : mots-clés `Moteur` (exclut) / `Charge`
+  (garde — hélice débrayée) ; **un tag de voile termine le mode moteur** ; sans colonne RPM,
+  l'exclusion est pilotée par les commentaires.
+- 🔄 Commentaires VDR **tolérants à la casse et aux accents** et aux **tags accolés**
+  (« GVJ1 » = GV + J1, « 2RJ3 » = 2R + J3).
+- 🔄 **Mise à jour** : suppression du filtre « 95 % » (doublon du percentile + effet cliquet).
+  L'existant et les nouvelles données sont ré-agrégés au percentile → la polaire peut **monter
+  ou descendre** (permet d'adapter une polaire théorique VPP, souvent trop optimiste, au bateau réel).
+
 ## [1.2.1] - 2026-06-12
 
 ### Corrigé
