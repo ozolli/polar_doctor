@@ -1,9 +1,32 @@
 #include "polar_doctor.h"
 
+// État de la mer : échelle normalisée OMM / Douglas (degrés 0 à 9), pré-remplie
+// pour chaque bateau (reste éditable ; un [seastates] dans le boat.cfg la remplace).
+static const char *const SEA_STATES_FR[] = {
+    "Calme", "Ridée", "Belle", "Peu agitée", "Agitée",
+    "Forte", "Très forte", "Grosse", "Très grosse", "Énorme"
+};
+static const char *const SEA_STATES_EN[] = {
+    "Calm", "Rippled", "Smooth", "Slight", "Moderate",
+    "Rough", "Very rough", "High", "Very high", "Phenomenal"
+};
+#define SEA_STATES_N ((int)(sizeof(SEA_STATES_FR) / sizeof(SEA_STATES_FR[0])))
+
+// Libellé d'affichage d'un état de mer : FR stocké en interne (= ce qu'on cherche
+// dans les commentaires) -> EN si langue anglaise et terme reconnu du Douglas.
+const char *sea_state_label(const char *fr, Language lang) {
+    if (lang != LANG_EN || !fr) return fr;
+    for (int i = 0; i < SEA_STATES_N; i++)
+        if (g_ascii_strcasecmp(fr, SEA_STATES_FR[i]) == 0) return SEA_STATES_EN[i];
+    return fr;
+}
+
 void boat_config_init(BoatConfig *c) {
     memset(c, 0, sizeof(*c));
     snprintf(c->kw_moteur, BOAT_TERM_LEN, "Moteur");
     snprintf(c->kw_charge, BOAT_TERM_LEN, "Charge");
+    for (int i = 0; i < SEA_STATES_N && i < BOAT_MAX_ITEMS; i++)
+        boat_list_add(c->seastate, &c->n_seastate, SEA_STATES_FR[i]);
 }
 
 // Rogne les espaces de début/fin, en place.
@@ -65,6 +88,7 @@ bool boat_config_load(BoatConfig *c, const char *path) {
     if (!f) return false;
     boat_config_init(c);
     char line[256], section[32] = "";
+    bool seastates_from_file = false;  // un [seastates] du fichier remplace le défaut Douglas
     while (fgets(line, sizeof(line), f)) {
         char *p = boat_str_trim(line);
         if (*p == 0 || *p == '#' || *p == ';') continue;
@@ -87,6 +111,7 @@ bool boat_config_load(BoatConfig *c, const char *path) {
         } else if (strcmp(section, "headsails") == 0) {
             boat_list_add(c->headsail, &c->n_headsail, p);
         } else if (strcmp(section, "seastates") == 0) {
+            if (!seastates_from_file) { c->n_seastate = 0; seastates_from_file = true; }
             boat_list_add(c->seastate, &c->n_seastate, p);
         } else if (strcmp(section, "polars") == 0) {
             char *eq = strchr(p, '=');

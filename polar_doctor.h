@@ -213,6 +213,7 @@ char *boat_str_trim(char *s);
 void boat_list_add(char list[][BOAT_TERM_LEN], int *n, const char *term);
 bool boat_config_load(BoatConfig *c, const char *path);
 bool boat_config_save(const BoatConfig *c, const char *path);
+const char *sea_state_label(const char *fr, Language lang);  // affichage FR/EN (Douglas)
 // Un dossier est « un bateau » s'il contient un config : boat.cfg, sinon <nom>.cfg,
 // sinon le premier *.cfg. Renvoie true + chemin complet du config dans out.
 bool boat_find_config(const char *folder, char *out, size_t outsz);
