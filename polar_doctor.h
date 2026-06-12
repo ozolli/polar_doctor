@@ -251,12 +251,12 @@ bool parse_nmea_sentence(const char *sentence, nmea_data_t *data);
 void add_data_point(polar_grid_t *grid, double twa, double tws, double bsp);
 double aggregate_cell(data_point_t *head);
 double get_polar_value(polar_grid_t *grid, int angle, int speed);
-int process_nmea_file(const char *filename, polar_grid_t *grid, bool update_mode, ProgressContext *progress);
+int process_nmea_file(const char *filename, polar_grid_t *grid, ProgressContext *progress);
 bool vdr_has_column(sqlite3 *db, const char *col);
 bool comment_has_keyword(const char *comment, const char *keyword);
-int process_vdr_file(const char *filename, polar_grid_t *grid, bool update_mode, ProgressContext *progress);
+int process_vdr_file(const char *filename, polar_grid_t *grid, ProgressContext *progress);
 bool is_vdr_file(const char *filename);
-int process_file(const char *filename, polar_grid_t *grid, bool update_mode, ProgressContext *progress);
+int process_file(const char *filename, polar_grid_t *grid, ProgressContext *progress);
 bool load_existing_polar_for_update(const char *filename, polar_grid_t *grid, ProgressContext *progress);
 void compute_polar(polar_grid_t *grid, double result[PG_MAX_ANGLES][PG_MAX_SPEEDS], ProgressContext *progress);
 

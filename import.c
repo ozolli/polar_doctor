@@ -256,7 +256,7 @@ void nmea_smoother_push(nmea_smoother_t *s, double twa, double tws, double bsp,
     *out_bsp = sb / s->count;
 }
 
-int process_nmea_file(const char *filename, polar_grid_t *grid, bool update_mode, ProgressContext *progress) {
+int process_nmea_file(const char *filename, polar_grid_t *grid, ProgressContext *progress) {
     FILE *f = fopen(filename, "r");
     if (!f) return -1;
 
@@ -302,29 +302,11 @@ int process_nmea_file(const char *filename, polar_grid_t *grid, bool update_mode
             if (g_polar_router) {
                 // NMEA n'a pas de commentaires -> état voile/mer inconnu : le point ne
                 // va que dans les polaires sans contrainte (critères « tout »).
-                for (int k = 0; k < g_polar_router->n; k++) {
-                    if (!polar_def_matches(&g_polar_router->defs[k], "", "", "")) continue;
-                    if (update_mode) {
-                        double existing = get_polar_value(&g_polar_router->grids[k],
-                                                          round_to_bucket(twa, PG_ANGLE_STEP),
-                                                          round_to_bucket(tws, PG_SPEED_STEP));
-                        if (existing > 0.0 && bsp < existing * 0.95) continue;
-                    }
-                    add_data_point(&g_polar_router->grids[k], twa, tws, bsp);
-                }
+                for (int k = 0; k < g_polar_router->n; k++)
+                    if (polar_def_matches(&g_polar_router->defs[k], "", "", ""))
+                        add_data_point(&g_polar_router->grids[k], twa, tws, bsp);
                 data_count++;
                 continue;
-            }
-
-            if (update_mode) {
-                int angle_bucket = round_to_bucket(twa, PG_ANGLE_STEP);
-                int speed_bucket = round_to_bucket(tws, PG_SPEED_STEP);
-                double existing = get_polar_value(grid, angle_bucket, speed_bucket);
-
-                if (existing > 0.0 && bsp < existing * 0.95) {
-                    filtered_count++;
-                    continue;
-                }
             }
 
             add_data_point(grid, twa, tws, bsp);
@@ -385,7 +367,7 @@ static bool comment_is_sail(const BoatConfig *c, const char *comment) {
 // État moteur déduit des commentaires (mots-clés du bateau) + RPM.
 typedef enum { ENG_SAILING, ENG_CHARGING, ENG_MOTORING } engine_state_t;
 
-int process_vdr_file(const char *filename, polar_grid_t *grid, bool update_mode, ProgressContext *progress) {
+int process_vdr_file(const char *filename, polar_grid_t *grid, ProgressContext *progress) {
     sqlite3 *db;
     sqlite3_stmt *stmt;
     int rc;
@@ -498,31 +480,11 @@ int process_vdr_file(const char *filename, polar_grid_t *grid, bool update_mode,
 
         if (g_polar_router) {
             // Routage : ranger le point dans chaque polaire dont les critères matchent.
-            // En mode mise à jour, on n'ajoute que si >= 95 % de la valeur existante
-            // de CETTE polaire (baseline dans son cache).
-            for (int k = 0; k < g_polar_router->n; k++) {
-                if (!polar_def_matches(&g_polar_router->defs[k], cur_main, cur_head, cur_sea)) continue;
-                if (update_mode) {
-                    double existing = get_polar_value(&g_polar_router->grids[k],
-                                                      round_to_bucket(twa, PG_ANGLE_STEP),
-                                                      round_to_bucket(tws, PG_SPEED_STEP));
-                    if (existing > 0.0 && stw < existing * 0.95) continue;
-                }
-                add_data_point(&g_polar_router->grids[k], twa, tws, stw);
-            }
+            for (int k = 0; k < g_polar_router->n; k++)
+                if (polar_def_matches(&g_polar_router->defs[k], cur_main, cur_head, cur_sea))
+                    add_data_point(&g_polar_router->grids[k], twa, tws, stw);
             data_count++;
             continue;
-        }
-
-        if (update_mode) {
-            int angle_bucket = round_to_bucket(twa, PG_ANGLE_STEP);
-            int speed_bucket = round_to_bucket(tws, PG_SPEED_STEP);
-            double existing = get_polar_value(grid, angle_bucket, speed_bucket);
-
-            if (existing > 0.0 && stw < existing * 0.95) {
-                filtered_count++;
-                continue;
-            }
         }
 
         add_data_point(grid, twa, tws, stw);
@@ -542,11 +504,11 @@ bool is_vdr_file(const char *filename) {
     return (strcasecmp(ext, ".db") == 0);
 }
 
-int process_file(const char *filename, polar_grid_t *grid, bool update_mode, ProgressContext *progress) {
+int process_file(const char *filename, polar_grid_t *grid, ProgressContext *progress) {
     if (is_vdr_file(filename)) {
-        return process_vdr_file(filename, grid, update_mode, progress);
+        return process_vdr_file(filename, grid, progress);
     } else {
-        return process_nmea_file(filename, grid, update_mode, progress);
+        return process_nmea_file(filename, grid, progress);
     }
 }
 

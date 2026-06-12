@@ -26,7 +26,7 @@ static int create_routed_polars(AppWidgets *app, GSList *filenames, ProgressCont
     polar_grid_t dummy;
     init_polar_grid(&dummy);
     for (GSList *l = filenames; l != NULL; l = l->next)
-        process_file((char *)l->data, &dummy, false, progress);
+        process_file((char *)l->data, &dummy, progress);
     g_polar_router = NULL;
     free_polar_grid(&dummy);
 
@@ -64,11 +64,9 @@ static int update_routed_polars(AppWidgets *app, GSList *filenames, ProgressCont
         PolarData pd;
         init_polar_data(&pd);
         if (g_file_test(path, G_FILE_TEST_IS_REGULAR) && load_polar_file(path, &pd)) {
-            load_polar_from_memory(&pd, &grids[k]);            // points existants
-            compute_polar(&grids[k], grids[k].cached_polar, progress);  // baseline
+            load_polar_from_memory(&pd, &grids[k]);  // ré-injecte les points existants
             active[k] = TRUE;
         }
-        grids[k].cache_valid = true;  // baseline figée (existant, ou 0 si inactive)
         g_free(fn); g_free(path);
     }
 
@@ -77,7 +75,7 @@ static int update_routed_polars(AppWidgets *app, GSList *filenames, ProgressCont
     polar_grid_t dummy;
     init_polar_grid(&dummy);
     for (GSList *l = filenames; l != NULL; l = l->next)
-        process_file((char *)l->data, &dummy, true, progress);   // update_mode = true
+        process_file((char *)l->data, &dummy, progress);
     g_polar_router = NULL;
     free_polar_grid(&dummy);
 
@@ -207,7 +205,7 @@ void on_create_clicked(GtkWidget *widget, gpointer user_data) {
             gtk_label_set_text(GTK_LABEL(progress_label), msg);
             while (gtk_events_pending()) gtk_main_iteration();
 
-            int result = process_file(filename, &grid, false, &progress);
+            int result = process_file(filename, &grid, &progress);
             if (result > 0) total_result += result;
         }
 
@@ -372,14 +370,11 @@ void on_update_clicked(GtkWidget *widget, gpointer user_data) {
         polar_grid_t grid;
         init_polar_grid(&grid);
 
-        // Charger la polaire existante depuis la mémoire
+        // Charger la polaire existante depuis la mémoire (ré-injectée comme points)
         load_polar_from_memory(app->polar_data, &grid);
 
-        // Calculer la polaire de référence
-        compute_polar(&grid, grid.cached_polar, &progress);
-        grid.cache_valid = true;
-
-        // Traiter tous les nouveaux fichiers en mode update
+        // Traiter tous les nouveaux fichiers (ré-agrégation au percentile : la polaire
+        // peut monter OU descendre vers le réel ; plus de garde 95 %)
         int total_result = 0;
         int file_count = 0;
         for (GSList *l = filenames; l != NULL; l = l->next) {
@@ -393,7 +388,7 @@ void on_update_clicked(GtkWidget *widget, gpointer user_data) {
             gtk_label_set_text(GTK_LABEL(progress_label), msg);
             while (gtk_events_pending()) gtk_main_iteration();
 
-            int result = process_file(filename, &grid, true, &progress);
+            int result = process_file(filename, &grid, &progress);
             if (result >= 0) total_result += result;
         }
 
