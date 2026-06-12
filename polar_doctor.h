@@ -109,6 +109,20 @@ typedef struct {
     bool have_offset;
 } stw_sog_filter_t;
 
+// Moyenne mobile circulaire des derniers points NMEA complets (voir NMEA_SMOOTH_WINDOW).
+typedef struct {
+    double twa[NMEA_SMOOTH_BUFSZ];
+    double tws[NMEA_SMOOTH_BUFSZ];
+    double bsp[NMEA_SMOOTH_BUFSZ];
+    int count;
+    int head;
+    double last_twa;
+    bool have_last;
+} nmea_smoother_t;
+void nmea_smoother_reset(nmea_smoother_t *s);
+void nmea_smoother_push(nmea_smoother_t *s, double twa, double tws, double bsp,
+                        double *out_twa, double *out_tws, double *out_bsp);
+
 typedef struct data_point {
     double bsp;
     struct data_point *next;

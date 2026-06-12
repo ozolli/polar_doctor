@@ -11,10 +11,20 @@
 typedef struct {
     AppWidgets *app;
     gboolean active;
+    int source;                 // 0 = VDR fichier, 1 = NMEA réseau (TCP)
     guint timer_id;
     char db_path[BOAT_PATH_LEN];
     long last_time;
     sqlite3 *db;
+    // NMEA réseau (TCP : client/conn/din ; UDP : usock/net_source)
+    GSocketClient *client;
+    GSocketConnection *conn;
+    GDataInputStream *din;
+    GCancellable *cancel;
+    GSocket *usock;
+    guint net_source;
+    nmea_data_t nmea;
+    nmea_smoother_t smoother;
     polar_grid_t *grids;
     int n;
     stw_sog_filter_t stwf;
@@ -22,7 +32,7 @@ typedef struct {
     gboolean moteur;
     int points;
     double last_twa, last_tws, last_stw, last_sog;
-    GtkWidget *path_entry, *toggle, *readout, *controls_box;
+    GtkWidget *path_entry, *net_entry, *source_combo, *toggle, *readout, *controls_box;
 } LiveSession;
 
 static LiveSession L;
@@ -211,39 +221,35 @@ static void live_save_all(void) {
 
 static void live_stop(void) {
     if (!L.active) return;
-    if (L.timer_id) { g_source_remove(L.timer_id); L.timer_id = 0; }
     L.active = FALSE;
+    if (L.timer_id) { g_source_remove(L.timer_id); L.timer_id = 0; }
     g_live_grid = NULL; g_live_cur_bsp = 0;   // retire le nuage live du diagramme
     gtk_widget_queue_draw(L.app->polar_view);
+
+    if (L.source == 1) {              // NMEA TCP
+        if (L.cancel) g_cancellable_cancel(L.cancel);
+        if (L.conn) g_io_stream_close(G_IO_STREAM(L.conn), NULL, NULL);
+        if (L.din)  { g_object_unref(L.din);  L.din = NULL; }
+        if (L.conn) { g_object_unref(L.conn); L.conn = NULL; }
+        if (L.client) { g_object_unref(L.client); L.client = NULL; }
+        if (L.cancel) { g_object_unref(L.cancel); L.cancel = NULL; }
+    } else if (L.source == 2) {       // NMEA UDP
+        if (L.net_source) { g_source_remove(L.net_source); L.net_source = 0; }
+        if (L.cancel) { g_cancellable_cancel(L.cancel); g_object_unref(L.cancel); L.cancel = NULL; }
+        if (L.usock) { g_socket_close(L.usock, NULL); g_object_unref(L.usock); L.usock = NULL; }
+    } else {                          // VDR fichier
+        if (L.db) { sqlite3_close(L.db); L.db = NULL; }
+    }
+
     live_save_all();
-    if (L.db) { sqlite3_close(L.db); L.db = NULL; }
     for (int k = 0; k < L.n; k++) free_polar_grid(&L.grids[k]);
     g_free(L.grids); L.grids = NULL; L.n = 0;
     gtk_button_set_label(GTK_BUTTON(L.toggle), TR(L.app, "⏺ Démarrer", "⏺ Start"));
     gtk_label_set_text(GTK_LABEL(L.readout), TR(L.app, "Arrêté (polaires enregistrées).", "Stopped (polars saved)."));
 }
 
-static void live_start(void) {
-    AppWidgets *app = L.app;
-    if (!(g_boat_config.n_polars > 0 && g_boat_config_path[0])) {
-        GtkWidget *d = gtk_message_dialog_new(GTK_WINDOW(app->window), GTK_DIALOG_MODAL,
-            GTK_MESSAGE_WARNING, GTK_BUTTONS_OK, "%s",
-            TR(app, "Ouvre un bateau et définis ses polaires avant la capture live.",
-                   "Open a boat and define its polars before live capture."));
-        gtk_dialog_run(GTK_DIALOG(d)); gtk_widget_destroy(d);
-        return;
-    }
-    g_strlcpy(L.db_path, gtk_entry_get_text(GTK_ENTRY(L.path_entry)), sizeof(L.db_path));
-    if (sqlite3_open_v2(L.db_path, &L.db, SQLITE_OPEN_READONLY, NULL) != SQLITE_OK) {
-        GtkWidget *d = gtk_message_dialog_new(GTK_WINDOW(app->window), GTK_DIALOG_MODAL,
-            GTK_MESSAGE_ERROR, GTK_BUTTONS_OK, "%s : %s",
-            TR(app, "Impossible d'ouvrir le VDR", "Cannot open the VDR"), L.db_path);
-        gtk_dialog_run(GTK_DIALOG(d)); gtk_widget_destroy(d);
-        if (L.db) { sqlite3_close(L.db); L.db = NULL; }
-        return;
-    }
-
-    // Grilles (une par polaire), ré-ensemencées depuis les .pol existants.
+// Construit les grilles (une par polaire), ré-ensemencées depuis les .pol existants.
+static void live_setup_grids(void) {
     L.n = g_boat_config.n_polars;
     L.grids = g_new0(polar_grid_t, L.n);
     char *folder = g_path_get_dirname(g_boat_config_path);
@@ -257,21 +263,168 @@ static void live_start(void) {
         g_free(fn); g_free(path);
     }
     g_free(folder);
-
     stw_sog_reset(&L.stwf);
     L.points = 0;
+}
 
-    // On ne reprend que les points POSTÉRIEURS au démarrage.
+// Source NMEA : l'ingestion se fait au fil du socket ; on rafraîchit l'affichage périodiquement.
+static gboolean live_refresh_tick(gpointer u) {
+    (void)u;
+    if (L.active) live_refresh_display();
+    return G_SOURCE_CONTINUE;
+}
+
+// Parse une trame et, si un point est complet, l'ingère (état des boutons).
+static void live_feed_line(const char *line) {
+    if (!parse_nmea_sentence(line, &L.nmea)) return;
+    double twa = L.nmea.twa, tws = L.nmea.tws, bsp = L.nmea.bsp;
+    if (NMEA_SMOOTH_WINDOW > 1)
+        nmea_smoother_push(&L.smoother, L.nmea.twa, L.nmea.tws, L.nmea.bsp, &twa, &tws, &bsp);
+    live_ingest(twa, tws, bsp, L.nmea.has_sog, L.nmea.sog);
+}
+
+// NMEA TCP : réception asynchrone ligne à ligne (réenchaînée tant que ça tourne).
+static void on_nmea_line(GObject *src, GAsyncResult *res, gpointer u) {
+    (void)u;
+    gsize len = 0; GError *e = NULL;
+    char *line = g_data_input_stream_read_line_finish(G_DATA_INPUT_STREAM(src), res, &len, &e);
+    if (e) { g_error_free(e); return; }   // annulé/erreur
+    if (!line) return;                    // EOF (flux fermé)
+    live_feed_line(line);
+    g_free(line);
+    if (L.active)
+        g_data_input_stream_read_line_async(L.din, G_PRIORITY_DEFAULT, L.cancel, on_nmea_line, NULL);
+}
+
+// NMEA UDP : un datagramme peut porter plusieurs trames -> découpage en lignes.
+static gboolean on_udp_data(GSocket *sock, GIOCondition cond, gpointer u) {
+    (void)cond; (void)u;
+    if (!L.active) return G_SOURCE_REMOVE;
+    char buf[2048]; GError *e = NULL;
+    gssize n = g_socket_receive(sock, buf, sizeof(buf) - 1, NULL, &e);
+    if (n <= 0) { if (e) g_error_free(e); return G_SOURCE_CONTINUE; }
+    buf[n] = 0;
+    char *save = NULL;
+    for (char *ln = strtok_r(buf, "\r\n", &save); ln; ln = strtok_r(NULL, "\r\n", &save))
+        live_feed_line(ln);
+    return G_SOURCE_CONTINUE;
+}
+
+// Extrait hôte + port d'une saisie « hôte:port » (ou « port » seul pour l'UDP).
+static void live_parse_hostport(char *host, size_t hsz, int *port, int defport) {
+    const char *hp = gtk_entry_get_text(GTK_ENTRY(L.net_entry));
+    g_strlcpy(host, "localhost", hsz);
+    *port = defport;
+    const char *colon = strrchr(hp, ':');
+    if (colon) {
+        int hl = (int)(colon - hp);
+        if (hl > 0 && hl < (int)hsz) { memcpy(host, hp, hl); host[hl] = 0; }
+        *port = atoi(colon + 1);
+    } else if (*hp) {
+        if (g_ascii_isdigit(*hp)) *port = atoi(hp);   // « port » seul
+        else g_strlcpy(host, hp, hsz);
+    }
+    if (*port <= 0) *port = defport;
+}
+
+static gboolean live_start_vdr(void) {
+    g_strlcpy(L.db_path, gtk_entry_get_text(GTK_ENTRY(L.path_entry)), sizeof(L.db_path));
+    if (sqlite3_open_v2(L.db_path, &L.db, SQLITE_OPEN_READONLY, NULL) != SQLITE_OK) {
+        GtkWidget *d = gtk_message_dialog_new(GTK_WINDOW(L.app->window), GTK_DIALOG_MODAL,
+            GTK_MESSAGE_ERROR, GTK_BUTTONS_OK, "%s : %s",
+            TR(L.app, "Impossible d'ouvrir le VDR", "Cannot open the VDR"), L.db_path);
+        gtk_dialog_run(GTK_DIALOG(d)); gtk_widget_destroy(d);
+        if (L.db) { sqlite3_close(L.db); L.db = NULL; }
+        return FALSE;
+    }
     sqlite3_stmt *st;
     L.last_time = 0;
     if (sqlite3_prepare_v2(L.db, "SELECT MAX(TIME) FROM VDR;", -1, &st, NULL) == SQLITE_OK) {
         if (sqlite3_step(st) == SQLITE_ROW) L.last_time = (long)sqlite3_column_int64(st, 0);
         sqlite3_finalize(st);
     }
+    L.timer_id = g_timeout_add(LIVE_INTERVAL_MS, live_tick, NULL);
+    return TRUE;
+}
 
+static gboolean live_start_nmea_tcp(void) {
+    char host[128]; int port;
+    live_parse_hostport(host, sizeof(host), &port, 10110);
+    L.client = g_socket_client_new();
+    GError *e = NULL;
+    L.conn = g_socket_client_connect_to_host(L.client, host, port, NULL, &e);
+    if (!L.conn) {
+        GtkWidget *d = gtk_message_dialog_new(GTK_WINDOW(L.app->window), GTK_DIALOG_MODAL,
+            GTK_MESSAGE_ERROR, GTK_BUTTONS_OK, "%s %s:%d\n%s",
+            TR(L.app, "Connexion NMEA TCP impossible :", "Cannot connect to NMEA TCP:"),
+            host, port, e ? e->message : "");
+        gtk_dialog_run(GTK_DIALOG(d)); gtk_widget_destroy(d);
+        if (e) g_error_free(e);
+        g_object_unref(L.client); L.client = NULL;
+        return FALSE;
+    }
+    GInputStream *in = g_io_stream_get_input_stream(G_IO_STREAM(L.conn));
+    L.din = g_data_input_stream_new(in);
+    L.cancel = g_cancellable_new();
+    memset(&L.nmea, 0, sizeof(L.nmea));
+    nmea_smoother_reset(&L.smoother);
+    g_data_input_stream_read_line_async(L.din, G_PRIORITY_DEFAULT, L.cancel, on_nmea_line, NULL);
+    L.timer_id = g_timeout_add(1500, live_refresh_tick, NULL);  // rafraîchit l'affichage
+    return TRUE;
+}
+
+static gboolean live_start_nmea_udp(void) {
+    char host[128]; int port;
+    live_parse_hostport(host, sizeof(host), &port, 10110);  // hôte ignoré (on écoute)
+    GError *e = NULL;
+    L.usock = g_socket_new(G_SOCKET_FAMILY_IPV4, G_SOCKET_TYPE_DATAGRAM, G_SOCKET_PROTOCOL_UDP, &e);
+    GInetAddress *any = g_inet_address_new_any(G_SOCKET_FAMILY_IPV4);
+    GSocketAddress *addr = g_inet_socket_address_new(any, port);
+    gboolean ok = L.usock && g_socket_bind(L.usock, addr, TRUE, &e);  // reuse-addr
+    g_object_unref(any); g_object_unref(addr);
+    if (!ok) {
+        GtkWidget *d = gtk_message_dialog_new(GTK_WINDOW(L.app->window), GTK_DIALOG_MODAL,
+            GTK_MESSAGE_ERROR, GTK_BUTTONS_OK, "%s %d\n%s",
+            TR(L.app, "Écoute UDP impossible sur le port", "Cannot listen UDP on port"),
+            port, e ? e->message : "");
+        gtk_dialog_run(GTK_DIALOG(d)); gtk_widget_destroy(d);
+        if (e) g_error_free(e);
+        if (L.usock) { g_object_unref(L.usock); L.usock = NULL; }
+        return FALSE;
+    }
+    g_socket_set_broadcast(L.usock, TRUE);
+    memset(&L.nmea, 0, sizeof(L.nmea));
+    nmea_smoother_reset(&L.smoother);
+    L.cancel = g_cancellable_new();
+    GSource *s = g_socket_create_source(L.usock, G_IO_IN, L.cancel);
+    g_source_set_callback(s, (GSourceFunc)on_udp_data, NULL, NULL);
+    L.net_source = g_source_attach(s, NULL);
+    g_source_unref(s);
+    L.timer_id = g_timeout_add(1500, live_refresh_tick, NULL);
+    return TRUE;
+}
+
+static void live_start(void) {
+    AppWidgets *app = L.app;
+    if (!(g_boat_config.n_polars > 0 && g_boat_config_path[0])) {
+        GtkWidget *d = gtk_message_dialog_new(GTK_WINDOW(app->window), GTK_DIALOG_MODAL,
+            GTK_MESSAGE_WARNING, GTK_BUTTONS_OK, "%s",
+            TR(app, "Ouvre un bateau et définis ses polaires avant la capture live.",
+                   "Open a boat and define its polars before live capture."));
+        gtk_dialog_run(GTK_DIALOG(d)); gtk_widget_destroy(d);
+        return;
+    }
+    L.source = gtk_combo_box_get_active(GTK_COMBO_BOX(L.source_combo));
+    live_setup_grids();
+    gboolean ok = (L.source == 1) ? live_start_nmea_tcp()
+                : (L.source == 2) ? live_start_nmea_udp() : live_start_vdr();
+    if (!ok) {
+        for (int k = 0; k < L.n; k++) free_polar_grid(&L.grids[k]);
+        g_free(L.grids); L.grids = NULL; L.n = 0;
+        return;
+    }
     rebuild_live_controls();
     L.active = TRUE;
-    L.timer_id = g_timeout_add(LIVE_INTERVAL_MS, live_tick, NULL);
     gtk_button_set_label(GTK_BUTTON(L.toggle), TR(app, "⏹ Arrêter", "⏹ Stop"));
     gtk_label_set_text(GTK_LABEL(L.readout), TR(app, "● Live démarré…", "● Live started…"));
 }
@@ -299,7 +452,15 @@ GtkWidget *create_live_tab(AppWidgets *app) {
     pango_attr_list_unref(tb);
     gtk_box_pack_start(GTK_BOX(box), title, FALSE, FALSE, 0);
 
-    GtkWidget *plabel = gtk_label_new(TR(app, "VDR qtVlm :", "qtVlm VDR:"));
+    // Choix de la source
+    L.source_combo = gtk_combo_box_text_new();
+    gtk_combo_box_text_append_text(GTK_COMBO_BOX_TEXT(L.source_combo), TR(app, "VDR qtVlm (fichier)", "qtVlm VDR (file)"));
+    gtk_combo_box_text_append_text(GTK_COMBO_BOX_TEXT(L.source_combo), TR(app, "NMEA réseau (TCP)", "NMEA network (TCP)"));
+    gtk_combo_box_text_append_text(GTK_COMBO_BOX_TEXT(L.source_combo), TR(app, "NMEA réseau (UDP)", "NMEA network (UDP)"));
+    gtk_combo_box_set_active(GTK_COMBO_BOX(L.source_combo), 0);
+    gtk_box_pack_start(GTK_BOX(box), L.source_combo, FALSE, FALSE, 0);
+
+    GtkWidget *plabel = gtk_label_new(TR(app, "Fichier VDR :", "VDR file:"));
     gtk_label_set_xalign(GTK_LABEL(plabel), 0.0);
     gtk_box_pack_start(GTK_BOX(box), plabel, FALSE, FALSE, 0);
     L.path_entry = gtk_entry_new();
@@ -308,6 +469,14 @@ GtkWidget *create_live_tab(AppWidgets *app) {
     gtk_entry_set_text(GTK_ENTRY(L.path_entry), def);
     g_free(def);
     gtk_box_pack_start(GTK_BOX(box), L.path_entry, FALSE, FALSE, 0);
+
+    GtkWidget *nlabel = gtk_label_new(TR(app, "NMEA hôte:port (UDP = port) :", "NMEA host:port (UDP = port):"));
+    gtk_label_set_xalign(GTK_LABEL(nlabel), 0.0);
+    gtk_box_pack_start(GTK_BOX(box), nlabel, FALSE, FALSE, 0);
+    L.net_entry = gtk_entry_new();
+    gtk_entry_set_width_chars(GTK_ENTRY(L.net_entry), 12);
+    gtk_entry_set_text(GTK_ENTRY(L.net_entry), "localhost:10110");
+    gtk_box_pack_start(GTK_BOX(box), L.net_entry, FALSE, FALSE, 0);
 
     L.toggle = gtk_button_new_with_label(TR(app, "⏺ Démarrer", "⏺ Start"));
     g_signal_connect(L.toggle, "clicked", G_CALLBACK(on_live_toggle), NULL);

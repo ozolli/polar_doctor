@@ -217,16 +217,6 @@ double get_polar_value(polar_grid_t *grid, int angle, int speed) {
     return aggregate_cell(grid->points[angle][speed]);
 }
 
-// Moyenne mobile circulaire des derniers points NMEA complets (voir NMEA_SMOOTH_WINDOW).
-typedef struct {
-    double twa[NMEA_SMOOTH_BUFSZ];
-    double tws[NMEA_SMOOTH_BUFSZ];
-    double bsp[NMEA_SMOOTH_BUFSZ];
-    int count;        // échantillons valides dans la fenêtre (<= BUFSZ)
-    int head;         // index d'écriture circulaire
-    double last_twa;  // pour détecter une manœuvre
-    bool have_last;
-} nmea_smoother_t;
 
 void nmea_smoother_reset(nmea_smoother_t *s) {
     s->count = 0;
