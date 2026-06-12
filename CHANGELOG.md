@@ -16,8 +16,19 @@ Toutes les modifications notables du projet seront documentées dans ce fichier.
   génération/mise à jour, chaque point est **routé** vers les polaires dont les critères
   correspondent (état voile/mer suivi via les commentaires) → **un `<nom>.pol` par polaire**.
 - ✅ **Sélecteur de polaire** dans la barre d'outils pour basculer entre les polaires d'un bateau.
+- ✅ **Capture live** (colonne à droite du diagramme) depuis 3 sources : **VDR qtVlm**
+  (suivi du fichier `vdr.db` en lecture seule, WAL), **NMEA TCP** (client) et **NMEA UDP**
+  (écoute). L'état voile/moteur/mer est piloté **en direct par des listes déroulantes + bouton
+  Moteur** (les commentaires VDR sont ignorés en live) ; chaque point est routé vers les polaires
+  du bateau. Visualisation temps réel : nuage de points bruts + point courant, échelle/plage
+  qui suivent les données ; grilles ré-ensemencées depuis les `.pol` au démarrage, enregistrées à l'arrêt.
+- ✅ **Refonte de l'interface** : barre latérale « Bateau » (nom + liste des polaires + actions),
+  barre d'outils recentrée sur les actions.
 
 ### Modifié
+- 🔄 **Import NMEA** : prise en charge du **vent vrai `MWD`** (TWA = TWD − cap, cap lu dans
+  `HDT`/`HDG` ou le champ cap de `VHW`) et des unités de vent **m/s** et **km/h** —
+  compatibilité avec NMEA Simulator et les passerelles ne diffusant pas `MWV,T`.
 - 🔄 **Filtre moteur configurable** par bateau : mots-clés `Moteur` (exclut) / `Charge`
   (garde — hélice débrayée) ; **un tag de voile termine le mode moteur** ; sans colonne RPM,
   l'exclusion est pilotée par les commentaires.
