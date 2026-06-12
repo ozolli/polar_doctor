@@ -168,7 +168,8 @@ typedef struct {
     GtkWidget *lang_button;
     GtkWidget *btn_open;
     GtkWidget *btn_new_boat;
-    GtkWidget *polar_combo;   // sélecteur de polaire du bateau ouvert (caché si aucun)
+    GtkWidget *boat_name_label;  // nom du bateau ouvert (panneau latéral)
+    GtkWidget *polar_list;       // liste des polaires du bateau (panneau latéral)
     GtkWidget *btn_save;
     GtkWidget *btn_create;
     GtkWidget *btn_update;

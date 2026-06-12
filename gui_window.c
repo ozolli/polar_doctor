@@ -849,42 +849,55 @@ gboolean on_window_delete(GtkWidget *widget, GdkEvent *event, gpointer user_data
 
 // --- Gestion du bateau = dossier (config + polaire) ---
 
-// Charge dans la vue la polaire sélectionnée dans le combo (<dossier>/<nom>.pol).
+// Charge dans la vue la polaire sélectionnée dans la liste (<dossier>/<nom>.pol).
 static void load_selected_polar(AppWidgets *app) {
     if (!g_boat_config_path[0]) return;
-    char *name = gtk_combo_box_text_get_active_text(GTK_COMBO_BOX_TEXT(app->polar_combo));
+    GtkListBoxRow *row = gtk_list_box_get_selected_row(GTK_LIST_BOX(app->polar_list));
+    if (!row) return;
+    const char *name = g_object_get_data(G_OBJECT(row), "name");
     if (!name) return;
     char *folder = g_path_get_dirname(g_boat_config_path);
     char *fn = g_strdup_printf("%s.pol", name);
     char *path = g_build_filename(folder, fn, NULL);
     if (load_polar_file(path, app->polar_data))
         refresh_after_polar_load(app, path);
-    g_free(path); g_free(fn); g_free(folder); g_free(name);
+    g_free(path); g_free(fn); g_free(folder);
 }
 
-static void on_polar_changed(GtkWidget *widget, gpointer user_data) {
-    (void)widget;
+static void on_polar_row_selected(GtkListBox *box, GtkListBoxRow *row, gpointer user_data) {
+    (void)box; (void)row;
     load_selected_polar((AppWidgets *)user_data);
 }
 
-// Remplit le sélecteur avec les polaires définies dont le .pol existe dans le dossier.
-// Charge la première (via le signal). Renvoie le nombre de polaires listées.
+// Remplit la liste latérale avec les polaires définies dont le .pol existe dans le
+// dossier. Sélectionne la première (via le signal). Renvoie le nombre listé.
 static int populate_polar_selector(AppWidgets *app, const char *folder) {
-    g_signal_handlers_block_by_func(app->polar_combo, (gpointer)on_polar_changed, app);
-    gtk_combo_box_text_remove_all(GTK_COMBO_BOX_TEXT(app->polar_combo));
+    g_signal_handlers_block_by_func(app->polar_list, (gpointer)on_polar_row_selected, app);
+    GList *kids = gtk_container_get_children(GTK_CONTAINER(app->polar_list));
+    for (GList *l = kids; l; l = l->next) gtk_widget_destroy(GTK_WIDGET(l->data));
+    g_list_free(kids);
     int count = 0;
     for (int k = 0; k < g_boat_config.n_polars; k++) {
         char *fn = g_strdup_printf("%s.pol", g_boat_config.polars[k].name);
         char *path = g_build_filename(folder, fn, NULL);
         if (g_file_test(path, G_FILE_TEST_IS_REGULAR)) {
-            gtk_combo_box_text_append_text(GTK_COMBO_BOX_TEXT(app->polar_combo), g_boat_config.polars[k].name);
+            GtkWidget *row = gtk_list_box_row_new();
+            GtkWidget *lbl = gtk_label_new(g_boat_config.polars[k].name);
+            gtk_label_set_xalign(GTK_LABEL(lbl), 0.0);
+            gtk_widget_set_margin_start(lbl, 4);
+            gtk_widget_set_margin_end(lbl, 4);
+            gtk_container_add(GTK_CONTAINER(row), lbl);
+            g_object_set_data_full(G_OBJECT(row), "name", g_strdup(g_boat_config.polars[k].name), g_free);
+            gtk_list_box_insert(GTK_LIST_BOX(app->polar_list), row, -1);
             count++;
         }
         g_free(fn); g_free(path);
     }
-    g_signal_handlers_unblock_by_func(app->polar_combo, (gpointer)on_polar_changed, app);
-    gtk_widget_set_visible(app->polar_combo, count > 0);
-    if (count > 0) gtk_combo_box_set_active(GTK_COMBO_BOX(app->polar_combo), 0);  // déclenche le chargement
+    gtk_widget_show_all(app->polar_list);
+    g_signal_handlers_unblock_by_func(app->polar_list, (gpointer)on_polar_row_selected, app);
+    if (count > 0)
+        gtk_list_box_select_row(GTK_LIST_BOX(app->polar_list),
+                                gtk_list_box_get_row_at_index(GTK_LIST_BOX(app->polar_list), 0));
     return count;
 }
 
@@ -923,10 +936,15 @@ void open_boat(AppWidgets *app, const char *folder) {
     boat_recent_add(folder);
 
     char *base = g_path_get_basename(folder);
+    const char *bn = g_boat_config.name[0] ? g_boat_config.name : base;
     char title[320];
-    snprintf(title, sizeof(title), "Polar Doctor — %s",
-             g_boat_config.name[0] ? g_boat_config.name : base);
+    snprintf(title, sizeof(title), "Polar Doctor — %s", bn);
     gtk_window_set_title(GTK_WINDOW(app->window), title);
+    if (app->boat_name_label) {
+        char hdr[160];
+        snprintf(hdr, sizeof(hdr), "⛵ %s", bn);
+        gtk_label_set_text(GTK_LABEL(app->boat_name_label), hdr);
+    }
     g_free(base);
 }
 
@@ -1082,29 +1100,27 @@ void create_main_window(AppWidgets *app) {
     GtkWidget *toolbar = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 5);
     gtk_container_set_border_width(GTK_CONTAINER(toolbar), 5);
 
-    app->btn_open = gtk_button_new_with_label(TR(app, "Ouvrir ▾", "Open ▾"));
-    app->btn_new_boat = gtk_button_new_with_label(TR(app, "Nouveau bateau", "New boat"));
+    // Boutons « bateau » (créés ici, mais placés dans le panneau latéral plus bas).
+    app->btn_open = gtk_button_new_with_label(TR(app, "📂 Ouvrir ▾", "📂 Open ▾"));
+    app->btn_new_boat = gtk_button_new_with_label(TR(app, "➕ Nouveau bateau", "➕ New boat"));
+    app->btn_boat = gtk_button_new_with_label(TR(app, "⚙ Bateau…", "⚙ Boat…"));
+    gtk_widget_set_tooltip_text(app->btn_boat,
+        TR(app, "Configurer l'inventaire et les polaires du bateau",
+               "Configure the boat inventory and polars"));
+    g_signal_connect(app->btn_open, "clicked", G_CALLBACK(on_open_menu), app);
+    g_signal_connect(app->btn_new_boat, "clicked", G_CALLBACK(on_new_boat_clicked), app);
+    g_signal_connect(app->btn_boat, "clicked", G_CALLBACK(on_boat_config_clicked), app);
+
+    // Boutons d'action sur la polaire courante (barre d'outils).
     app->btn_save = gtk_button_new_with_label(TR(app, "Enregistrer", "Save"));
     app->btn_create = gtk_button_new_with_label(TR(app, "Créer", "Create"));
     app->btn_update = gtk_button_new_with_label(TR(app, "Mettre à jour", "Update"));
     app->btn_export_pdf = gtk_button_new_with_label(TR(app, "Export PDF", "Export PDF"));
-
-    app->polar_combo = gtk_combo_box_text_new();
-    gtk_widget_set_tooltip_text(app->polar_combo,
-        TR(app, "Polaire du bateau à afficher", "Boat polar to display"));
-    gtk_widget_set_no_show_all(app->polar_combo, TRUE);  // visible seulement si le bateau a des polaires
-    g_signal_connect(app->polar_combo, "changed", G_CALLBACK(on_polar_changed), app);
-
-    g_signal_connect(app->btn_open, "clicked", G_CALLBACK(on_open_menu), app);
-    g_signal_connect(app->btn_new_boat, "clicked", G_CALLBACK(on_new_boat_clicked), app);
     g_signal_connect(app->btn_save, "clicked", G_CALLBACK(on_save_clicked), app);
     g_signal_connect(app->btn_create, "clicked", G_CALLBACK(on_create_clicked), app);
     g_signal_connect(app->btn_update, "clicked", G_CALLBACK(on_update_clicked), app);
     g_signal_connect(app->btn_export_pdf, "clicked", G_CALLBACK(on_export_pdf_clicked), app);
 
-    gtk_box_pack_start(GTK_BOX(toolbar), app->btn_open, FALSE, FALSE, 0);
-    gtk_box_pack_start(GTK_BOX(toolbar), app->btn_new_boat, FALSE, FALSE, 0);
-    gtk_box_pack_start(GTK_BOX(toolbar), app->polar_combo, FALSE, FALSE, 0);
     gtk_box_pack_start(GTK_BOX(toolbar), app->btn_save, FALSE, FALSE, 0);
     gtk_box_pack_start(GTK_BOX(toolbar), app->btn_create, FALSE, FALSE, 0);
     gtk_box_pack_start(GTK_BOX(toolbar), app->btn_update, FALSE, FALSE, 0);
@@ -1148,16 +1164,6 @@ void create_main_window(AppWidgets *app) {
     GtkWidget *separator3 = gtk_separator_new(GTK_ORIENTATION_VERTICAL);
     gtk_box_pack_start(GTK_BOX(toolbar), separator3, FALSE, FALSE, 5);
 
-    // Bouton Configuration du bateau (inventaire voiles / états de mer)
-    app->btn_boat = gtk_button_new_with_label(TR(app, "Bateau…", "Boat…"));
-    gtk_widget_set_tooltip_text(app->btn_boat,
-        TR(app, "Configurer l'inventaire du bateau : grand-voile, voiles d'avant, "
-                "états de mer, mots-clés moteur.",
-               "Configure the boat inventory: mainsail, headsails, sea states, "
-               "engine keywords."));
-    g_signal_connect(app->btn_boat, "clicked", G_CALLBACK(on_boat_config_clicked), app);
-    gtk_box_pack_start(GTK_BOX(toolbar), app->btn_boat, FALSE, FALSE, 0);
-
     // Bouton Aide
     app->btn_help = gtk_button_new_with_label(TR(app, "Aide", "Help"));
     g_signal_connect(app->btn_help, "clicked", G_CALLBACK(on_help_clicked), app);
@@ -1179,7 +1185,41 @@ void create_main_window(AppWidgets *app) {
     gtk_notebook_append_page(GTK_NOTEBOOK(app->notebook), data_tab, gtk_label_new("Données de la polaire"));
     gtk_notebook_append_page(GTK_NOTEBOOK(app->notebook), diagram_tab, gtk_label_new("Diagramme de la polaire"));
 
-    gtk_box_pack_start(GTK_BOX(vbox), app->notebook, TRUE, TRUE, 0);
+    // Panneau latéral « Bateau » : nom + actions bateau + liste des polaires.
+    GtkWidget *sidebar = gtk_box_new(GTK_ORIENTATION_VERTICAL, 6);
+    gtk_container_set_border_width(GTK_CONTAINER(sidebar), 6);
+
+    app->boat_name_label = gtk_label_new(TR(app, "Aucun bateau", "No boat"));
+    gtk_label_set_xalign(GTK_LABEL(app->boat_name_label), 0.0);
+    PangoAttrList *bold = pango_attr_list_new();
+    pango_attr_list_insert(bold, pango_attr_weight_new(PANGO_WEIGHT_BOLD));
+    gtk_label_set_attributes(GTK_LABEL(app->boat_name_label), bold);
+    pango_attr_list_unref(bold);
+    gtk_box_pack_start(GTK_BOX(sidebar), app->boat_name_label, FALSE, FALSE, 0);
+
+    gtk_box_pack_start(GTK_BOX(sidebar), app->btn_open, FALSE, FALSE, 0);
+    gtk_box_pack_start(GTK_BOX(sidebar), app->btn_new_boat, FALSE, FALSE, 0);
+    gtk_box_pack_start(GTK_BOX(sidebar), app->btn_boat, FALSE, FALSE, 0);
+    gtk_box_pack_start(GTK_BOX(sidebar),
+                       gtk_separator_new(GTK_ORIENTATION_HORIZONTAL), FALSE, FALSE, 2);
+
+    GtkWidget *pol_lbl = gtk_label_new(TR(app, "Polaires", "Polars"));
+    gtk_label_set_xalign(GTK_LABEL(pol_lbl), 0.0);
+    gtk_box_pack_start(GTK_BOX(sidebar), pol_lbl, FALSE, FALSE, 0);
+
+    GtkWidget *plsw = gtk_scrolled_window_new(NULL, NULL);
+    gtk_scrolled_window_set_policy(GTK_SCROLLED_WINDOW(plsw), GTK_POLICY_NEVER, GTK_POLICY_AUTOMATIC);
+    app->polar_list = gtk_list_box_new();
+    gtk_list_box_set_selection_mode(GTK_LIST_BOX(app->polar_list), GTK_SELECTION_SINGLE);
+    g_signal_connect(app->polar_list, "row-selected", G_CALLBACK(on_polar_row_selected), app);
+    gtk_container_add(GTK_CONTAINER(plsw), app->polar_list);
+    gtk_box_pack_start(GTK_BOX(sidebar), plsw, TRUE, TRUE, 0);
+
+    GtkWidget *hpaned = gtk_paned_new(GTK_ORIENTATION_HORIZONTAL);
+    gtk_paned_pack1(GTK_PANED(hpaned), sidebar, FALSE, FALSE);
+    gtk_paned_pack2(GTK_PANED(hpaned), app->notebook, TRUE, TRUE);
+    gtk_paned_set_position(GTK_PANED(hpaned), 210);
+    gtk_box_pack_start(GTK_BOX(vbox), hpaned, TRUE, TRUE, 0);
 
     // Barre de status
     app->status_bar = gtk_statusbar_new();
@@ -1224,8 +1264,9 @@ void update_interface_language(AppWidgets *app) {
                                      "VMG");
 
     // Mettre à jour les labels des boutons
-    gtk_button_set_label(GTK_BUTTON(app->btn_open), TR(app, "Ouvrir ▾", "Open ▾"));
-    gtk_button_set_label(GTK_BUTTON(app->btn_new_boat), TR(app, "Nouveau bateau", "New boat"));
+    gtk_button_set_label(GTK_BUTTON(app->btn_open), TR(app, "📂 Ouvrir ▾", "📂 Open ▾"));
+    gtk_button_set_label(GTK_BUTTON(app->btn_new_boat), TR(app, "➕ Nouveau bateau", "➕ New boat"));
+    gtk_button_set_label(GTK_BUTTON(app->btn_boat), TR(app, "⚙ Bateau…", "⚙ Boat…"));
     gtk_button_set_label(GTK_BUTTON(app->btn_save), TR(app, "Enregistrer", "Save"));
     gtk_button_set_label(GTK_BUTTON(app->btn_create), TR(app, "Créer", "Create"));
     gtk_button_set_label(GTK_BUTTON(app->btn_update), TR(app, "Mettre à jour", "Update"));
