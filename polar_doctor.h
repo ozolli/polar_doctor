@@ -18,6 +18,7 @@
 #include <stdbool.h>
 #include <sqlite3.h>
 #include <limits.h>
+#include <glib/gstdio.h>
 
 // Configuration spécifique Windows pour les dialogues de fichiers
 #ifdef _WIN32
@@ -141,6 +142,7 @@ typedef struct {
     GtkWidget *vmg_container;
     GtkWidget *lang_button;
     GtkWidget *btn_open;
+    GtkWidget *btn_new_boat;
     GtkWidget *btn_save;
     GtkWidget *btn_create;
     GtkWidget *btn_update;
@@ -191,11 +193,19 @@ typedef struct {
 // ---- Prototypes ----
 
 // boat_config.c
+#define BOAT_PATH_LEN 512   // longueur max d'un chemin de bateau/config
+#define BOAT_RECENT_MAX 8   // nb de bateaux récents conservés
 void boat_config_init(BoatConfig *c);
 char *boat_str_trim(char *s);
 void boat_list_add(char list[][BOAT_TERM_LEN], int *n, const char *term);
 bool boat_config_load(BoatConfig *c, const char *path);
 bool boat_config_save(const BoatConfig *c, const char *path);
+// Un dossier est « un bateau » s'il contient un config : boat.cfg, sinon <nom>.cfg,
+// sinon le premier *.cfg. Renvoie true + chemin complet du config dans out.
+bool boat_find_config(const char *folder, char *out, size_t outsz);
+// Liste des bateaux récents (chemins de dossiers), le plus récent en tête.
+int boat_recent_load(char list[][BOAT_PATH_LEN], int max);
+void boat_recent_add(const char *boat_folder);
 
 // import.c
 void stw_sog_reset(stw_sog_filter_t *f);
@@ -258,6 +268,7 @@ void on_tws_changed(GtkWidget *widget, gpointer user_data);
 gboolean prompt_save_changes(AppWidgets *app);
 void on_open_clicked(GtkWidget *widget, gpointer user_data);
 void on_save_clicked(GtkWidget *widget, gpointer user_data);
+void refresh_after_polar_load(AppWidgets *app, const char *filename);
 
 // export_pdf.c
 void on_export_pdf_clicked(GtkWidget *widget, gpointer user_data);
@@ -280,6 +291,12 @@ void on_percentile_changed(GtkWidget *widget, gpointer user_data);
 void update_interface_language(AppWidgets *app);
 void on_help_clicked(GtkWidget *widget, gpointer user_data);
 void on_boat_config_clicked(GtkWidget *widget, gpointer user_data);
+// Gestion bateau = dossier (config + polaire(s))
+void open_boat(AppWidgets *app, const char *folder);
+void on_open_menu(GtkWidget *widget, gpointer user_data);
+void on_recent_boat_activate(GtkWidget *widget, gpointer user_data);
+void on_browse_boat(GtkWidget *widget, gpointer user_data);
+void on_new_boat_clicked(GtkWidget *widget, gpointer user_data);
 
 // win32_dialogs.c (Windows uniquement)
 #ifdef _WIN32

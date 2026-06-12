@@ -665,6 +665,29 @@ gboolean prompt_save_changes(AppWidgets *app) {
 }
 
 // Callbacks des menus
+// Rafraîchit toute l'interface après le chargement d'une polaire (.pol) :
+// tableau de données, combos TWS, table VMG, diagramme, barre d'état.
+void refresh_after_polar_load(AppWidgets *app, const char *filename) {
+    rebuild_data_tab(app);
+
+    gtk_combo_box_text_remove_all(GTK_COMBO_BOX_TEXT(app->tws_from_combo));
+    gtk_combo_box_text_remove_all(GTK_COMBO_BOX_TEXT(app->tws_to_combo));
+    for (int i = 0; i < app->polar_data->num_speeds; i++) {
+        int tws = app->polar_data->tws_values[i];
+        if (tws == 0) continue;  // Ne pas afficher TWS 0
+        char text[16];
+        snprintf(text, sizeof(text), "%d kn", tws);
+        gtk_combo_box_text_append_text(GTK_COMBO_BOX_TEXT(app->tws_from_combo), text);
+        gtk_combo_box_text_append_text(GTK_COMBO_BOX_TEXT(app->tws_to_combo), text);
+    }
+    gtk_combo_box_set_active(GTK_COMBO_BOX(app->tws_from_combo), 0);
+    gtk_combo_box_set_active(GTK_COMBO_BOX(app->tws_to_combo), tws_default_to_index(app->polar_data));
+
+    rebuild_vmg_table(app);
+    gtk_widget_queue_draw(app->polar_view);
+    if (filename) gtk_statusbar_push(GTK_STATUSBAR(app->status_bar), 0, filename);
+}
+
 void on_open_clicked(GtkWidget *widget, gpointer user_data) {
     AppWidgets *app = (AppWidgets *)user_data;
 
@@ -701,30 +724,7 @@ void on_open_clicked(GtkWidget *widget, gpointer user_data) {
     if (filename) {
 
         if (load_polar_file(filename, app->polar_data)) {
-            // Reconstruire complètement l'interface (les colonnes peuvent changer)
-            rebuild_data_tab(app);
-
-            // Mettre à jour les combo box TWS
-            gtk_combo_box_text_remove_all(GTK_COMBO_BOX_TEXT(app->tws_from_combo));
-            gtk_combo_box_text_remove_all(GTK_COMBO_BOX_TEXT(app->tws_to_combo));
-
-            for (int i = 0; i < app->polar_data->num_speeds; i++) {
-                int tws = app->polar_data->tws_values[i];
-                if (tws == 0) continue;  // Ne pas afficher TWS 0
-                char text[16];
-                snprintf(text, sizeof(text), "%d kn", tws);
-                gtk_combo_box_text_append_text(GTK_COMBO_BOX_TEXT(app->tws_from_combo), text);
-                gtk_combo_box_text_append_text(GTK_COMBO_BOX_TEXT(app->tws_to_combo), text);
-            }
-            gtk_combo_box_set_active(GTK_COMBO_BOX(app->tws_from_combo), 0);
-            int last_idx = tws_default_to_index(app->polar_data);
-            gtk_combo_box_set_active(GTK_COMBO_BOX(app->tws_to_combo), last_idx);
-
-            // Reconstruire le tableau VMG
-            rebuild_vmg_table(app);
-
-            gtk_widget_queue_draw(app->polar_view);
-            gtk_statusbar_push(GTK_STATUSBAR(app->status_bar), 0, filename);
+            refresh_after_polar_load(app, filename);
         } else {
             GtkWidget *error_dialog = gtk_message_dialog_new(GTK_WINDOW(app->window),
                                                               GTK_DIALOG_MODAL,

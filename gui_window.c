@@ -721,6 +721,130 @@ gboolean on_window_delete(GtkWidget *widget, GdkEvent *event, gpointer user_data
     return TRUE;  // Empêcher la fermeture
 }
 
+// --- Gestion du bateau = dossier (config + polaire) ---
+
+// Ouvre un bateau : charge son config (boat.cfg / <nom>.cfg) dans l'inventaire,
+// charge sa polaire, met à jour les récents et le titre de la fenêtre.
+void open_boat(AppWidgets *app, const char *folder) {
+    if (!prompt_save_changes(app)) return;
+
+    char cfg[BOAT_PATH_LEN];
+    if (boat_find_config(folder, cfg, sizeof(cfg)))
+        boat_config_load(&g_boat_config, cfg);
+
+    // Charger la première polaire .pol du dossier (1 polaire/bateau pour l'instant)
+    char polpath[BOAT_PATH_LEN] = "";
+    GDir *d = g_dir_open(folder, 0, NULL);
+    if (d) {
+        const char *nm;
+        while ((nm = g_dir_read_name(d))) {
+            if (g_str_has_suffix(nm, ".pol")) {
+                char *q = g_build_filename(folder, nm, NULL);
+                g_strlcpy(polpath, q, sizeof(polpath));
+                g_free(q);
+                break;
+            }
+        }
+        g_dir_close(d);
+    }
+    if (*polpath && load_polar_file(polpath, app->polar_data))
+        refresh_after_polar_load(app, polpath);
+
+    boat_recent_add(folder);
+
+    char *base = g_path_get_basename(folder);
+    char title[320];
+    snprintf(title, sizeof(title), "Polar Doctor — %s",
+             g_boat_config.name[0] ? g_boat_config.name : base);
+    gtk_window_set_title(GTK_WINDOW(app->window), title);
+    g_free(base);
+}
+
+void on_recent_boat_activate(GtkWidget *widget, gpointer user_data) {
+    const char *folder = g_object_get_data(G_OBJECT(widget), "boat");
+    if (folder) open_boat((AppWidgets *)user_data, folder);
+}
+
+void on_browse_boat(GtkWidget *widget, gpointer user_data) {
+    (void)widget;
+    AppWidgets *app = (AppWidgets *)user_data;
+    GtkWidget *fc = gtk_file_chooser_dialog_new(
+        TR(app, "Choisir un dossier-bateau", "Select a boat folder"),
+        GTK_WINDOW(app->window), GTK_FILE_CHOOSER_ACTION_SELECT_FOLDER,
+        TR(app, "_Annuler", "_Cancel"), GTK_RESPONSE_CANCEL,
+        TR(app, "_Ouvrir", "_Open"), GTK_RESPONSE_ACCEPT, NULL);
+    if (gtk_dialog_run(GTK_DIALOG(fc)) == GTK_RESPONSE_ACCEPT) {
+        char *folder = gtk_file_chooser_get_filename(GTK_FILE_CHOOSER(fc));
+        if (folder) { open_boat(app, folder); g_free(folder); }
+    }
+    gtk_widget_destroy(fc);
+}
+
+// Clic sur « Ouvrir » -> menu : bateaux récents + parcourir un bateau + ouvrir une polaire.
+void on_open_menu(GtkWidget *widget, gpointer user_data) {
+    AppWidgets *app = (AppWidgets *)user_data;
+    GtkWidget *menu = gtk_menu_new();
+
+    char list[BOAT_RECENT_MAX][BOAT_PATH_LEN];
+    int n = boat_recent_load(list, BOAT_RECENT_MAX);
+    for (int i = 0; i < n; i++) {
+        char *base = g_path_get_basename(list[i]);
+        char *label = g_strdup_printf("⛵ %s", base);
+        GtkWidget *it = gtk_menu_item_new_with_label(label);
+        g_free(label); g_free(base);
+        g_object_set_data_full(G_OBJECT(it), "boat", g_strdup(list[i]), g_free);
+        g_signal_connect(it, "activate", G_CALLBACK(on_recent_boat_activate), app);
+        gtk_menu_shell_append(GTK_MENU_SHELL(menu), it);
+    }
+    if (n > 0) gtk_menu_shell_append(GTK_MENU_SHELL(menu), gtk_separator_menu_item_new());
+
+    GtkWidget *browse = gtk_menu_item_new_with_label(TR(app, "Parcourir un bateau…", "Browse a boat…"));
+    g_signal_connect(browse, "activate", G_CALLBACK(on_browse_boat), app);
+    gtk_menu_shell_append(GTK_MENU_SHELL(menu), browse);
+
+    GtkWidget *opol = gtk_menu_item_new_with_label(TR(app, "Ouvrir une polaire…", "Open a polar…"));
+    g_signal_connect(opol, "activate", G_CALLBACK(on_open_clicked), app);
+    gtk_menu_shell_append(GTK_MENU_SHELL(menu), opol);
+
+    g_signal_connect(menu, "selection-done", G_CALLBACK(gtk_widget_destroy), NULL);
+    gtk_widget_show_all(menu);
+    gtk_menu_popup_at_widget(GTK_MENU(menu), widget,
+                             GDK_GRAVITY_SOUTH_WEST, GDK_GRAVITY_NORTH_WEST, NULL);
+}
+
+// Nouveau bateau : crée/choisit un dossier, y écrit <nom>.cfg + une polaire vide, puis l'ouvre.
+void on_new_boat_clicked(GtkWidget *widget, gpointer user_data) {
+    (void)widget;
+    AppWidgets *app = (AppWidgets *)user_data;
+    if (!prompt_save_changes(app)) return;
+
+    GtkWidget *fc = gtk_file_chooser_dialog_new(
+        TR(app, "Nouveau bateau : créer/choisir un dossier", "New boat: create/select a folder"),
+        GTK_WINDOW(app->window), GTK_FILE_CHOOSER_ACTION_CREATE_FOLDER,
+        TR(app, "_Annuler", "_Cancel"), GTK_RESPONSE_CANCEL,
+        TR(app, "_Créer", "_Create"), GTK_RESPONSE_ACCEPT, NULL);
+    if (gtk_dialog_run(GTK_DIALOG(fc)) == GTK_RESPONSE_ACCEPT) {
+        char *folder = gtk_file_chooser_get_filename(GTK_FILE_CHOOSER(fc));
+        if (folder) {
+            char *base = g_path_get_basename(folder);
+            boat_config_init(&g_boat_config);
+            g_strlcpy(g_boat_config.name, base, sizeof(g_boat_config.name));
+            char *named = g_strdup_printf("%s.cfg", base);          // config nommé d'après le bateau
+            char *cfgpath = g_build_filename(folder, named, NULL);
+            boat_config_save(&g_boat_config, cfgpath);
+            char *polname = g_strdup_printf("%s.pol", base);        // polaire vide
+            char *polpath = g_build_filename(folder, polname, NULL);
+            init_polar_data(app->polar_data);
+            g_strlcpy(app->polar_data->filename, polpath, sizeof(app->polar_data->filename));
+            save_polar_file(polpath, app->polar_data);
+            g_free(named); g_free(cfgpath); g_free(polname); g_free(polpath); g_free(base);
+            open_boat(app, folder);
+            g_free(folder);
+        }
+    }
+    gtk_widget_destroy(fc);
+}
+
 // Dessine un petit drapeau (24x16) via Cairo et le renvoie en pixbuf. On évite les
 // emojis-drapeaux : Windows (Segoe UI Emoji) les rend en lettres « FR » / « GB ».
 static GdkPixbuf *make_flag_pixbuf(Language lang) {
@@ -787,19 +911,22 @@ void create_main_window(AppWidgets *app) {
     GtkWidget *toolbar = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 5);
     gtk_container_set_border_width(GTK_CONTAINER(toolbar), 5);
 
-    app->btn_open = gtk_button_new_with_label(TR(app, "Ouvrir", "Open"));
+    app->btn_open = gtk_button_new_with_label(TR(app, "Ouvrir ▾", "Open ▾"));
+    app->btn_new_boat = gtk_button_new_with_label(TR(app, "Nouveau bateau", "New boat"));
     app->btn_save = gtk_button_new_with_label(TR(app, "Enregistrer", "Save"));
     app->btn_create = gtk_button_new_with_label(TR(app, "Créer", "Create"));
     app->btn_update = gtk_button_new_with_label(TR(app, "Mettre à jour", "Update"));
     app->btn_export_pdf = gtk_button_new_with_label(TR(app, "Export PDF", "Export PDF"));
 
-    g_signal_connect(app->btn_open, "clicked", G_CALLBACK(on_open_clicked), app);
+    g_signal_connect(app->btn_open, "clicked", G_CALLBACK(on_open_menu), app);
+    g_signal_connect(app->btn_new_boat, "clicked", G_CALLBACK(on_new_boat_clicked), app);
     g_signal_connect(app->btn_save, "clicked", G_CALLBACK(on_save_clicked), app);
     g_signal_connect(app->btn_create, "clicked", G_CALLBACK(on_create_clicked), app);
     g_signal_connect(app->btn_update, "clicked", G_CALLBACK(on_update_clicked), app);
     g_signal_connect(app->btn_export_pdf, "clicked", G_CALLBACK(on_export_pdf_clicked), app);
 
     gtk_box_pack_start(GTK_BOX(toolbar), app->btn_open, FALSE, FALSE, 0);
+    gtk_box_pack_start(GTK_BOX(toolbar), app->btn_new_boat, FALSE, FALSE, 0);
     gtk_box_pack_start(GTK_BOX(toolbar), app->btn_save, FALSE, FALSE, 0);
     gtk_box_pack_start(GTK_BOX(toolbar), app->btn_create, FALSE, FALSE, 0);
     gtk_box_pack_start(GTK_BOX(toolbar), app->btn_update, FALSE, FALSE, 0);
@@ -919,7 +1046,8 @@ void update_interface_language(AppWidgets *app) {
                                      "VMG");
 
     // Mettre à jour les labels des boutons
-    gtk_button_set_label(GTK_BUTTON(app->btn_open), TR(app, "Ouvrir", "Open"));
+    gtk_button_set_label(GTK_BUTTON(app->btn_open), TR(app, "Ouvrir ▾", "Open ▾"));
+    gtk_button_set_label(GTK_BUTTON(app->btn_new_boat), TR(app, "Nouveau bateau", "New boat"));
     gtk_button_set_label(GTK_BUTTON(app->btn_save), TR(app, "Enregistrer", "Save"));
     gtk_button_set_label(GTK_BUTTON(app->btn_create), TR(app, "Créer", "Create"));
     gtk_button_set_label(GTK_BUTTON(app->btn_update), TR(app, "Mettre à jour", "Update"));

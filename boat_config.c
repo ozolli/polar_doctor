@@ -70,3 +70,76 @@ bool boat_config_save(const BoatConfig *c, const char *path) {
     fclose(f);
     return true;
 }
+
+// Trouve le fichier de config d'un dossier-bateau : boat.cfg, sinon <nom>.cfg,
+// sinon le premier *.cfg. Renvoie true et remplit out (chemin complet).
+bool boat_find_config(const char *folder, char *out, size_t outsz) {
+    char *p = g_build_filename(folder, "boat.cfg", NULL);          // 1) boat.cfg
+    if (g_file_test(p, G_FILE_TEST_IS_REGULAR)) {
+        g_strlcpy(out, p, outsz); g_free(p); return true;
+    }
+    g_free(p);
+
+    char *base = g_path_get_basename(folder);                       // 2) <nom>.cfg
+    char *named = g_strdup_printf("%s.cfg", base);
+    p = g_build_filename(folder, named, NULL);
+    bool ok = g_file_test(p, G_FILE_TEST_IS_REGULAR);
+    if (ok) g_strlcpy(out, p, outsz);
+    g_free(p); g_free(named); g_free(base);
+    if (ok) return true;
+
+    GDir *d = g_dir_open(folder, 0, NULL);                          // 3) premier *.cfg
+    if (d) {
+        const char *name;
+        while ((name = g_dir_read_name(d))) {
+            if (g_str_has_suffix(name, ".cfg")) {
+                char *q = g_build_filename(folder, name, NULL);
+                g_strlcpy(out, q, outsz); g_free(q);
+                g_dir_close(d); return true;
+            }
+        }
+        g_dir_close(d);
+    }
+    return false;
+}
+
+// Chemin du fichier des bateaux récents (~/.config/polar_doctor/recent_boats),
+// crée le dossier au besoin. À libérer avec g_free().
+static char *boat_recent_path(void) {
+    char *dir = g_build_filename(g_get_user_config_dir(), "polar_doctor", NULL);
+    g_mkdir_with_parents(dir, 0755);
+    char *p = g_build_filename(dir, "recent_boats", NULL);
+    g_free(dir);
+    return p;
+}
+
+int boat_recent_load(char list[][BOAT_PATH_LEN], int max) {
+    char *path = boat_recent_path();
+    FILE *f = fopen(path, "r");
+    g_free(path);
+    if (!f) return 0;
+    int n = 0;
+    char line[BOAT_PATH_LEN];
+    while (n < max && fgets(line, sizeof(line), f)) {
+        char *t = boat_str_trim(line);
+        if (*t) { g_strlcpy(list[n], t, BOAT_PATH_LEN); n++; }
+    }
+    fclose(f);
+    return n;
+}
+
+// Place boat_folder en tête de la liste des récents (dédoublonné, plafonné).
+void boat_recent_add(const char *boat_folder) {
+    char list[BOAT_RECENT_MAX + 1][BOAT_PATH_LEN];
+    int n = boat_recent_load(list, BOAT_RECENT_MAX + 1);
+    char *path = boat_recent_path();
+    FILE *f = fopen(path, "w");
+    g_free(path);
+    if (!f) return;
+    fprintf(f, "%s\n", boat_folder);
+    int written = 1;
+    for (int i = 0; i < n && written < BOAT_RECENT_MAX; i++) {
+        if (strcmp(list[i], boat_folder) != 0) { fprintf(f, "%s\n", list[i]); written++; }
+    }
+    fclose(f);
+}
