@@ -119,6 +119,16 @@ gboolean draw_polar_diagram(GtkWidget *widget, cairo_t *cr, gpointer user_data) 
         }
     }
 
+    // En capture live, l'échelle radiale doit englober les points bruts (et le point
+    // courant) qui peuvent dépasser la courbe (surf, rafales) — sinon ils sortent du cadre.
+    if (g_live_grid) {
+        for (int a = 0; a < PG_MAX_ANGLES; a++)
+            for (int s = 0; s < PG_MAX_SPEEDS; s++)
+                for (data_point_t *p = g_live_grid->points[a][s]; p; p = p->next)
+                    if (p->bsp > max_bsp) max_bsp = p->bsp;
+        if (g_live_cur_bsp > max_bsp) max_bsp = g_live_cur_bsp;
+    }
+
     // Arrondir à l'entier supérieur
     int max_scale = (int)ceil(max_bsp);
     if (max_scale < 1) max_scale = 10;
