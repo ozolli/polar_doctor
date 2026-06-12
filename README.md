@@ -8,6 +8,33 @@
 
 ![Polar Doctor](polar_doctor.png)
 
+## ⚓ C'est quoi une polaire (et à quoi sert ce programme) ?
+
+La **polaire** d'un voilier est un tableau — et un diagramme — qui donne la vitesse
+du bateau pour chaque combinaison d'**angle** et de **force** du vent. C'est la carte
+d'identité de performance du bateau, utilisée par les logiciels de routage et pour
+comparer/régler vos navigations.
+
+Polar Doctor fabrique cette polaire à partir de vos données **réelles** : fichiers de
+log NMEA0183, bases VDR de qtVlm, ou **en direct** pendant que vous naviguez. Plus vous
+accumulez de données dans des conditions variées, plus la polaire est fidèle.
+
+**Le vocabulaire en 30 secondes :**
+
+| Sigle | Signification |
+|-------|---------------|
+| **TWA** | *True Wind Angle* — angle du vent réel par rapport à l'axe du bateau, de 0° (vent debout) à 180° (vent arrière) |
+| **TWS** | *True Wind Speed* — force du vent réel (nœuds) |
+| **STW / BSP** | *Speed Through Water* — vitesse du bateau dans l'eau (loch) ; c'est ce que la polaire représente |
+| **SOG** | *Speed Over Ground* — vitesse par rapport au fond (GPS) ; sert à fiabiliser le STW |
+| **VMG** | *Velocity Made Good* — composante de la vitesse dans l'axe du vent ; efficacité au près et au portant |
+| **AWA / AWS** | vent **apparent** ressenti à bord (vent réel combiné à la vitesse du bateau) |
+
+**Prise en main en 4 étapes :** ① ouvrir ou créer un bateau → ② (option) régler son
+inventaire (voiles, états de mer, nombre de polaires) → ③ **Créer** depuis des fichiers
+de log ou **Capture live** en navigation → ④ lire (onglets Données / Polaire / VMG),
+corriger, **Export PDF**.
+
 ## 🌟 Fonctionnalités
 
 ### Génération de polaires
@@ -31,6 +58,17 @@
   (état voile/mer suivi via les commentaires VDR) → un `.pol` par polaire
 - ✅ **Sélecteur de polaire** pour basculer entre les polaires du bateau
 - ✅ Filtre moteur configurable (`Moteur`/`Charge`) ; commentaires tolérants casse/accents et accolés (`GVJ1`)
+
+### Capture live (temps réel)
+- 📡 Alimente les polaires du bateau **en direct** depuis 3 sources :
+  - **VDR qtVlm** : suit le fichier `vdr.db` en lecture seule (mode WAL)
+  - **NMEA TCP** : client vers une passerelle (ex. `hôte:10110`)
+  - **NMEA UDP** : écoute d'un port de diffusion
+- ✅ État **voile / moteur / mer** piloté en direct par **listes déroulantes + bouton Moteur**
+  (les commentaires VDR sont ignorés en live)
+- ✅ Chaque point est **routé** vers les polaires correspondantes
+- ✅ **Visualisation temps réel** : nuage de points bruts + point courant, échelle et plage TWS qui suivent les données
+- ✅ Grilles ré-ensemencées depuis les `.pol` au démarrage, enregistrées à l'arrêt
 
 ### Édition graphique
 - ✅ Tableau de données éditable (double-clic)
@@ -160,18 +198,34 @@ Consultez [BUILD.md](BUILD.md) pour les instructions détaillées pour :
   polar_doctor.exe
   ```
 
+### 6. Capturer en direct (live)
+
+1. Ouvrir le **bateau** à alimenter
+2. Dans la colonne à droite du diagramme, choisir la **source** : VDR qtVlm, NMEA TCP ou NMEA UDP
+   (renseigner le chemin du `vdr.db` ou l'adresse `hôte:port`)
+3. Régler l'état courant via les **listes déroulantes** (grand-voile / voile d'avant / état de mer)
+   et le bouton **Moteur**
+4. Cliquer sur **Démarrer** : les points arrivent en temps réel, routés vers les polaires correspondantes
+5. **Arrêter** : les polaires sont enregistrées
+
 ## 📊 Format des fichiers
 
 ### Fichiers NMEA
 
 Sentences supportées :
-- **MWV** - Vent (TWA, TWS) — *requise*
+- **MWV** - Vent apparent **ou** vrai (réf. `R`/`T`) — *vent*
+- **MWD** - Vent **vrai** (direction + vitesse) — *vent*, alternative à MWV
 - **VHW** - Vitesse surface / STW — *requise*
+- **HDT / HDG** - Cap vrai — nécessaire pour calculer le TWA à partir de MWD (`TWA = TWD − cap`)
 - **RMC, VTG, VBW, RMA, OSD** - Vitesse fond (SOG), lue si présente pour débruiter le STW
+
+Unités de vent reconnues : **nœuds (`N`)**, **m/s (`M`)**, **km/h (`K`)**.
 
 Exemple :
 ```
 $IIMWV,045.2,T,12.3,N,A*XX
+$WIMWD,135.0,T,,,12.3,N,6.3,M*XX
+$IIHDT,090.0,T*XX
 $IIVHW,,,,,05.8,N,,*XX
 $GPRMC,123519,A,4807.038,N,01131.000,E,5.8,084.4,230394,,,A*XX
 ```
@@ -253,9 +307,10 @@ boat_config.c      # Config bateau : inventaire voiles/mer, lecture/écriture IN
 import.c           # NMEA (champs préservés + SOG RMC/VTG/VBW/RMA/OSD) + VDR
                    #   (filtre moteur RPM/Charge, débruitage STW/SOG) + agrégation P90
 polar_data.c       # Modèle PolarData : .pol load/save, interpolation, VMG, palette
-diagram.c          # Dessin du diagramme polaire + mode dynamique + événements
+diagram.c          # Dessin du diagramme polaire + mode dynamique + événements + overlay live
 gui_tabs.c         # Onglets Données/Diagramme, table VMG, légende, ouverture/sauvegarde
 gui_window.c       # Fenêtre, toolbar, création/MAJ, édition, langue, dialogues Aide/Bateau
+live.c             # Capture live : sources VDR/NMEA TCP/UDP, routage, boutons d'état temps réel
 export_pdf.c       # Export / impression PDF
 win32_dialogs.c    # Dialogues de fichiers natifs Windows (vide hors Windows)
 main.c             # Point d'entrée + globals
@@ -303,7 +358,7 @@ Développé avec ❤️ pour la communauté nautique
 
 ## 📈 Statistiques
 
-- **Lignes de code :** ~4400
+- **Lignes de code :** ~6200 (10 modules + header commun)
 - **Fonctions :** 90+
 - **Formats supportés :** 3 (NMEA, VDR, POL)
 - **Langues :** 2 (FR, EN)
