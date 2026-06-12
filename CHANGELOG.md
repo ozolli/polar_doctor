@@ -27,6 +27,10 @@ Toutes les modifications notables du projet seront documentées dans ce fichier.
 - 🐛 **Parsing NMEA** : les champs vides des trames sont préservés (positions fixes au lieu
   d'un découpage qui fusionnait les virgules). Corrige l'interprétation des trames **VHW sans
   cap vrai** (ex. `$IIVHW,,T,25.0,M,5.9,N,…`), dont le STW était auparavant lu de travers
+- 🐛 **[Windows]** L'application ne démarrait pas (abort `0x40000015` dans libglib) : le
+  packaging ne copiait pas les **dépendances des loaders gdk-pixbuf** (chargés dynamiquement,
+  invisibles à `ldd`). Sans `librsvg-2-2.dll` & co., GTK échouait fatalement au chargement de
+  l'icône SVG du thème. La CI copie désormais ces dépendances (+ `gdbus.exe`, schémas compilés)
 
 ## [1.1.0] - 2026-06-11
 

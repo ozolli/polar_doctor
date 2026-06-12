@@ -213,6 +213,25 @@ jobs:
         cp -r /mingw64/share/icons/Adwaita polar_doctor_win/share/icons/ || true
         cp -r /mingw64/lib/gdk-pixbuf-2.0/2.10.0 polar_doctor_win/lib/gdk-pixbuf-2.0/ || true
 
+        # Dépendances des loaders gdk-pixbuf : ils sont chargés DYNAMIQUEMENT, donc
+        # invisibles à `ldd polar_doctor.exe`. Sans elles (notamment librsvg-2-2.dll
+        # + libxml2… pour le loader SVG), GTK fait un abort fatal au démarrage en
+        # chargeant l'icône SVG du thème Adwaita. On copie les deps de chaque loader.
+        echo "Copying gdk-pixbuf loader dependencies (librsvg, etc.)"
+        for dll in polar_doctor_win/lib/gdk-pixbuf-2.0/2.10.0/loaders/*.dll; do
+          [ -f "$dll" ] && ldd "$dll" 2>/dev/null | grep mingw64 | awk '{print $3}' | xargs -I {} cp -u {} polar_doctor_win/ 2>/dev/null || true
+        done
+        # Passes transitives (ex. librsvg -> libxml2 ; déjà copiées -> deps de deps)
+        for i in 1 2 3; do
+          for dll in polar_doctor_win/*.dll; do [ -f "$dll" ] && ldd "$dll" 2>/dev/null | grep mingw64 | awk '{print $3}' | xargs -I {} cp -u {} polar_doctor_win/ 2>/dev/null || true; done
+        done
+
+        # Schémas GSettings compilés (requis par le sélecteur de fichiers)
+        glib-compile-schemas polar_doctor_win/share/glib-2.0/schemas || true
+
+        # Helper gdbus (spawné à l'exécution par GIO, non listé par ldd)
+        cp /mingw64/bin/gdbus.exe polar_doctor_win/ 2>/dev/null || true
+
         # List all copied DLLs for debugging
         echo "Copied DLLs:"
         ls -lh polar_doctor_win/*.dll
