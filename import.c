@@ -299,6 +299,16 @@ int process_nmea_file(const char *filename, polar_grid_t *grid, bool update_mode
                 nmea_smoother_push(&smoother, current_data.twa, current_data.tws,
                                    current_data.bsp, &twa, &tws, &bsp);
 
+            if (g_polar_router) {
+                // NMEA n'a pas de commentaires -> état voile/mer inconnu : le point ne
+                // va que dans les polaires sans contrainte (critères « tout »).
+                for (int k = 0; k < g_polar_router->n; k++)
+                    if (polar_def_matches(&g_polar_router->defs[k], "", "", ""))
+                        add_data_point(&g_polar_router->grids[k], twa, tws, bsp);
+                data_count++;
+                continue;
+            }
+
             if (update_mode) {
                 int angle_bucket = round_to_bucket(twa, PG_ANGLE_STEP);
                 int speed_bucket = round_to_bucket(tws, PG_SPEED_STEP);
@@ -397,6 +407,8 @@ int process_vdr_file(const char *filename, polar_grid_t *grid, bool update_mode,
     stw_sog_reset(&stwf);
     long prev_time = 0;
     bool have_prev_time = false;
+    // État courant pour le routage multi-polaires (forward-fill depuis les commentaires).
+    char cur_main[BOAT_TERM_LEN] = "", cur_head[BOAT_TERM_LEN] = "", cur_sea[BOAT_TERM_LEN] = "";
 
     while ((rc = sqlite3_step(stmt)) == SQLITE_ROW) {
         double twa = fabs(sqlite3_column_double(stmt, 0));
@@ -418,6 +430,13 @@ int process_vdr_file(const char *filename, polar_grid_t *grid, bool update_mode,
             if (comment_has_keyword(comment, g_boat_config.kw_charge))      engine = ENG_CHARGING;
             else if (comment_has_keyword(comment, g_boat_config.kw_moteur)) engine = ENG_MOTORING;
             else if (comment_is_sail(&g_boat_config, comment))             engine = ENG_SAILING;
+            // État courant voile/mer (pour le routage) : on retient le terme reconnu.
+            for (int i = 0; i < g_boat_config.n_mainsail; i++)
+                if (comment_has_keyword(comment, g_boat_config.mainsail[i])) { g_strlcpy(cur_main, g_boat_config.mainsail[i], BOAT_TERM_LEN); break; }
+            for (int i = 0; i < g_boat_config.n_headsail; i++)
+                if (comment_has_keyword(comment, g_boat_config.headsail[i])) { g_strlcpy(cur_head, g_boat_config.headsail[i], BOAT_TERM_LEN); break; }
+            for (int i = 0; i < g_boat_config.n_seastate; i++)
+                if (comment_has_keyword(comment, g_boat_config.seastate[i])) { g_strlcpy(cur_sea, g_boat_config.seastate[i], BOAT_TERM_LEN); break; }
         }
         if (has_rpm && rpm <= 0.0) engine = ENG_SAILING;  // moteur coupé -> fin de session
 
@@ -455,6 +474,15 @@ int process_vdr_file(const char *filename, polar_grid_t *grid, bool update_mode,
                 sqlite3_close(db);
                 return -1;
             }
+        }
+
+        if (g_polar_router) {
+            // Routage : ranger le point dans chaque polaire dont les critères matchent.
+            for (int k = 0; k < g_polar_router->n; k++)
+                if (polar_def_matches(&g_polar_router->defs[k], cur_main, cur_head, cur_sea))
+                    add_data_point(&g_polar_router->grids[k], twa, tws, stw);
+            data_count++;
+            continue;
         }
 
         if (update_mode) {

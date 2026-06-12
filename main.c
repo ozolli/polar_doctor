@@ -3,6 +3,7 @@
 int g_polar_percentile = DEFAULT_POLAR_PERCENTILE;
 BoatConfig g_boat_config;
 char g_boat_config_path[BOAT_PATH_LEN] = "";
+polar_router_t *g_polar_router = NULL;
 
 int main(int argc, char *argv[]) {
     // Fix pour Windows - désactive les portails GTK qui peuvent causer des crashes

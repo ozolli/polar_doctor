@@ -1,5 +1,56 @@
 #include "polar_doctor.h"
 
+// Calcule une grille et l'enregistre en .pol au chemin donné.
+static bool grid_to_polar_file(polar_grid_t *grid, const char *path, ProgressContext *progress) {
+    double polar[PG_MAX_ANGLES][PG_MAX_SPEEDS];
+    compute_polar(grid, polar, progress);
+    PolarData pd;
+    init_polar_data(&pd);
+    load_polar_from_grid(&pd, grid, polar);
+    g_strlcpy(pd.filename, path, sizeof(pd.filename));
+    return save_polar_file(path, &pd);
+}
+
+// Génère une polaire par définition du bateau : route les points (selon l'état
+// voile/mer courant) vers une grille par polaire, enregistre <dossier>/<nom>.pol,
+// et charge la première polaire non vide dans la vue. Renvoie le nb de .pol écrits.
+static int create_routed_polars(AppWidgets *app, GSList *filenames, ProgressContext *progress) {
+    int n = g_boat_config.n_polars;
+    polar_grid_t *grids = g_new0(polar_grid_t, n);
+    for (int k = 0; k < n; k++) init_polar_grid(&grids[k]);
+
+    polar_router_t router = { grids, g_boat_config.polars, n };
+    g_polar_router = &router;
+    polar_grid_t dummy;
+    init_polar_grid(&dummy);
+    for (GSList *l = filenames; l != NULL; l = l->next)
+        process_file((char *)l->data, &dummy, false, progress);
+    g_polar_router = NULL;
+    free_polar_grid(&dummy);
+
+    char *folder = g_path_get_dirname(g_boat_config_path);
+    char first_path[BOAT_PATH_LEN] = "";
+    int saved = 0;
+    for (int k = 0; k < n; k++) {
+        if (grids[k].point_count <= 0) continue;
+        char *fn = g_strdup_printf("%s.pol", g_boat_config.polars[k].name);
+        char *path = g_build_filename(folder, fn, NULL);
+        if (grid_to_polar_file(&grids[k], path, progress)) {
+            saved++;
+            if (!first_path[0]) g_strlcpy(first_path, path, sizeof(first_path));
+        }
+        g_free(fn);
+        g_free(path);
+    }
+    g_free(folder);
+    for (int k = 0; k < n; k++) free_polar_grid(&grids[k]);
+    g_free(grids);
+
+    if (first_path[0] && load_polar_file(first_path, app->polar_data))
+        refresh_after_polar_load(app, first_path);
+    return saved;
+}
+
 void on_create_clicked(GtkWidget *widget, gpointer user_data) {
     AppWidgets *app = (AppWidgets *)user_data;
 
@@ -76,6 +127,22 @@ void on_create_clicked(GtkWidget *widget, gpointer user_data) {
         gboolean cancel_flag = FALSE;
         ProgressContext progress = {progress_dialog, progress_label, &cancel_flag};
 
+        if (g_boat_config.n_polars > 0 && g_boat_config_path[0]) {
+            // Mode bateau : router les données vers une polaire par définition.
+            int saved = create_routed_polars(app, filenames, &progress);
+            gtk_widget_destroy(progress_dialog);
+            char msg[160];
+            snprintf(msg, sizeof(msg),
+                     TR(app, "%d polaire(s) générée(s) dans le dossier du bateau.",
+                            "%d polar(s) generated in the boat folder."), saved);
+            GtkWidget *info = gtk_message_dialog_new(GTK_WINDOW(app->window), GTK_DIALOG_MODAL,
+                saved > 0 ? GTK_MESSAGE_INFO : GTK_MESSAGE_WARNING, GTK_BUTTONS_OK, "%s",
+                saved > 0 ? msg
+                : TR(app, "Aucune polaire générée : aucune donnée ne correspond aux critères définis.",
+                         "No polar generated: no data matched the defined criteria."));
+            gtk_dialog_run(GTK_DIALOG(info));
+            gtk_widget_destroy(info);
+        } else {
         // Initialiser la grille polaire
         polar_grid_t grid;
         init_polar_grid(&grid);
@@ -145,6 +212,7 @@ void on_create_clicked(GtkWidget *widget, gpointer user_data) {
         }
 
         free_polar_grid(&grid);
+        }
 #ifdef _WIN32
         // Sur Windows, les fichiers sont alloués avec malloc(), pas g_malloc()
         g_slist_free_full(filenames, free);

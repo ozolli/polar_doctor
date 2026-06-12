@@ -121,6 +121,17 @@ typedef struct {
     int angle_min, angle_max, speed_min, speed_max, point_count;
 } polar_grid_t;
 
+// Routage multi-polaires à l'import : chaque point est rangé dans toutes les grilles
+// dont la définition matche l'état courant (GV/voile d'avant/mer). Si g_polar_router
+// est NULL, l'import alimente une grille unique (comportement classique).
+typedef struct {
+    polar_grid_t *grids;     // n grilles (une par polaire)
+    const PolarDef *defs;    // n définitions (g_boat_config.polars)
+    int n;
+} polar_router_t;
+
+extern polar_router_t *g_polar_router;
+
 typedef struct {
     GtkWidget *dialog;
     GtkWidget *label;
