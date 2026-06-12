@@ -302,9 +302,16 @@ int process_nmea_file(const char *filename, polar_grid_t *grid, bool update_mode
             if (g_polar_router) {
                 // NMEA n'a pas de commentaires -> état voile/mer inconnu : le point ne
                 // va que dans les polaires sans contrainte (critères « tout »).
-                for (int k = 0; k < g_polar_router->n; k++)
-                    if (polar_def_matches(&g_polar_router->defs[k], "", "", ""))
-                        add_data_point(&g_polar_router->grids[k], twa, tws, bsp);
+                for (int k = 0; k < g_polar_router->n; k++) {
+                    if (!polar_def_matches(&g_polar_router->defs[k], "", "", "")) continue;
+                    if (update_mode) {
+                        double existing = get_polar_value(&g_polar_router->grids[k],
+                                                          round_to_bucket(twa, PG_ANGLE_STEP),
+                                                          round_to_bucket(tws, PG_SPEED_STEP));
+                        if (existing > 0.0 && bsp < existing * 0.95) continue;
+                    }
+                    add_data_point(&g_polar_router->grids[k], twa, tws, bsp);
+                }
                 data_count++;
                 continue;
             }
@@ -491,9 +498,18 @@ int process_vdr_file(const char *filename, polar_grid_t *grid, bool update_mode,
 
         if (g_polar_router) {
             // Routage : ranger le point dans chaque polaire dont les critères matchent.
-            for (int k = 0; k < g_polar_router->n; k++)
-                if (polar_def_matches(&g_polar_router->defs[k], cur_main, cur_head, cur_sea))
-                    add_data_point(&g_polar_router->grids[k], twa, tws, stw);
+            // En mode mise à jour, on n'ajoute que si >= 95 % de la valeur existante
+            // de CETTE polaire (baseline dans son cache).
+            for (int k = 0; k < g_polar_router->n; k++) {
+                if (!polar_def_matches(&g_polar_router->defs[k], cur_main, cur_head, cur_sea)) continue;
+                if (update_mode) {
+                    double existing = get_polar_value(&g_polar_router->grids[k],
+                                                      round_to_bucket(twa, PG_ANGLE_STEP),
+                                                      round_to_bucket(tws, PG_SPEED_STEP));
+                    if (existing > 0.0 && stw < existing * 0.95) continue;
+                }
+                add_data_point(&g_polar_router->grids[k], twa, tws, stw);
+            }
             data_count++;
             continue;
         }

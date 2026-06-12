@@ -48,6 +48,55 @@ static int create_routed_polars(AppWidgets *app, GSList *filenames, ProgressCont
     return saved;
 }
 
+// Met à jour les polaires existantes du bateau : pour chaque <nom>.pol présent, on
+// réensemence sa grille (baseline), on route les nouveaux points (≥95 % par polaire),
+// on recalcule et on réécrit le .pol. Renvoie le nb de polaires mises à jour.
+static int update_routed_polars(AppWidgets *app, GSList *filenames, ProgressContext *progress) {
+    int n = g_boat_config.n_polars;
+    char *folder = g_path_get_dirname(g_boat_config_path);
+    polar_grid_t *grids = g_new0(polar_grid_t, n);
+    gboolean *active = g_new0(gboolean, n);
+
+    for (int k = 0; k < n; k++) {
+        init_polar_grid(&grids[k]);
+        char *fn = g_strdup_printf("%s.pol", g_boat_config.polars[k].name);
+        char *path = g_build_filename(folder, fn, NULL);
+        PolarData pd;
+        init_polar_data(&pd);
+        if (g_file_test(path, G_FILE_TEST_IS_REGULAR) && load_polar_file(path, &pd)) {
+            load_polar_from_memory(&pd, &grids[k]);            // points existants
+            compute_polar(&grids[k], grids[k].cached_polar, progress);  // baseline
+            active[k] = TRUE;
+        }
+        grids[k].cache_valid = true;  // baseline figée (existant, ou 0 si inactive)
+        g_free(fn); g_free(path);
+    }
+
+    polar_router_t router = { grids, g_boat_config.polars, n };
+    g_polar_router = &router;
+    polar_grid_t dummy;
+    init_polar_grid(&dummy);
+    for (GSList *l = filenames; l != NULL; l = l->next)
+        process_file((char *)l->data, &dummy, true, progress);   // update_mode = true
+    g_polar_router = NULL;
+    free_polar_grid(&dummy);
+
+    int saved = 0;
+    for (int k = 0; k < n; k++) {
+        if (!active[k]) continue;                 // on ne met à jour que les .pol existants
+        char *fn = g_strdup_printf("%s.pol", g_boat_config.polars[k].name);
+        char *path = g_build_filename(folder, fn, NULL);
+        if (grid_to_polar_file(&grids[k], path, progress)) saved++;
+        g_free(fn); g_free(path);
+    }
+    for (int k = 0; k < n; k++) free_polar_grid(&grids[k]);
+    g_free(grids); g_free(active);
+
+    populate_polar_selector(app, folder);  // recharge la vue
+    g_free(folder);
+    return saved;
+}
+
 void on_create_clicked(GtkWidget *widget, gpointer user_data) {
     AppWidgets *app = (AppWidgets *)user_data;
 
@@ -222,7 +271,8 @@ void on_create_clicked(GtkWidget *widget, gpointer user_data) {
 void on_update_clicked(GtkWidget *widget, gpointer user_data) {
     AppWidgets *app = (AppWidgets *)user_data;
 
-    if (app->polar_data->num_speeds == 0 || app->polar_data->num_angles == 0) {
+    gboolean routing = (g_boat_config.n_polars > 0 && g_boat_config_path[0]);
+    if (!routing && (app->polar_data->num_speeds == 0 || app->polar_data->num_angles == 0)) {
         GtkWidget *error_dialog = gtk_message_dialog_new(GTK_WINDOW(app->window),
                                                           GTK_DIALOG_MODAL,
                                                           GTK_MESSAGE_ERROR,
@@ -303,6 +353,21 @@ void on_update_clicked(GtkWidget *widget, gpointer user_data) {
         gboolean cancel_flag = FALSE;
         ProgressContext progress = {progress_dialog, progress_label, &cancel_flag};
 
+        if (routing) {
+            // Mode bateau : mettre à jour chaque <nom>.pol existant via le routage.
+            int saved = update_routed_polars(app, filenames, &progress);
+            gtk_widget_destroy(progress_dialog);
+            char msg[160];
+            snprintf(msg, sizeof(msg),
+                     TR(app, "%d polaire(s) mise(s) à jour.", "%d polar(s) updated."), saved);
+            GtkWidget *info = gtk_message_dialog_new(GTK_WINDOW(app->window), GTK_DIALOG_MODAL,
+                saved > 0 ? GTK_MESSAGE_INFO : GTK_MESSAGE_WARNING, GTK_BUTTONS_OK, "%s",
+                saved > 0 ? msg
+                : TR(app, "Aucune polaire mise à jour (aucun .pol existant pour ce bateau).",
+                         "No polar updated (no existing .pol for this boat)."));
+            gtk_dialog_run(GTK_DIALOG(info));
+            gtk_widget_destroy(info);
+        } else {
         // Initialiser la grille polaire
         polar_grid_t grid;
         init_polar_grid(&grid);
@@ -381,6 +446,7 @@ void on_update_clicked(GtkWidget *widget, gpointer user_data) {
 
         // Libérer la mémoire (grille et liste de fichiers)
         free_polar_grid(&grid);
+        }
 #ifdef _WIN32
         g_slist_free_full(filenames, free);
 #else
