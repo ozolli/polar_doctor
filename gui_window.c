@@ -1078,9 +1078,10 @@ static void set_lang_button_flag(AppWidgets *app) {
 
 // Créer la fenêtre principale
 void create_main_window(AppWidgets *app) {
+    app->language = LANG_FR;  // doit être posé AVANT la création des onglets (qui utilisent TR)
     app->window = gtk_window_new(GTK_WINDOW_TOPLEVEL);
     gtk_window_set_title(GTK_WINDOW(app->window), "Polar Doctor");
-    gtk_window_set_default_size(GTK_WINDOW(app->window), 1200, 700);
+    gtk_window_set_default_size(GTK_WINDOW(app->window), 1400, 720);
 
     // Définir l'icône de la fenêtre
     GError *error = NULL;
@@ -1185,7 +1186,6 @@ void create_main_window(AppWidgets *app) {
 
     gtk_notebook_append_page(GTK_NOTEBOOK(app->notebook), data_tab, gtk_label_new("Données de la polaire"));
     gtk_notebook_append_page(GTK_NOTEBOOK(app->notebook), diagram_tab, gtk_label_new("Diagramme de la polaire"));
-    gtk_notebook_append_page(GTK_NOTEBOOK(app->notebook), create_live_tab(app), gtk_label_new("Live"));
 
     // Panneau latéral « Bateau » : nom + actions bateau + liste des polaires.
     GtkWidget *sidebar = gtk_box_new(GTK_ORIENTATION_VERTICAL, 6);

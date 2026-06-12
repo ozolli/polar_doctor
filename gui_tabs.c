@@ -300,6 +300,11 @@ GtkWidget *create_diagram_tab(AppWidgets *app) {
 
     gtk_box_pack_start(GTK_BOX(hbox), vbox_right, FALSE, FALSE, 0);
 
+    // Colonne « Live » à droite (boutons d'annotation + démarrer/arrêter) — à côté
+    // du diagramme pour annoter en regardant le nuage de points se construire.
+    gtk_box_pack_start(GTK_BOX(hbox), gtk_separator_new(GTK_ORIENTATION_VERTICAL), FALSE, FALSE, 0);
+    gtk_box_pack_start(GTK_BOX(hbox), create_live_tab(app), FALSE, FALSE, 0);
+
     app->polar_view = drawing_area;
 
     return hbox;
