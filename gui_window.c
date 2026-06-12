@@ -721,6 +721,47 @@ gboolean on_window_delete(GtkWidget *widget, GdkEvent *event, gpointer user_data
     return TRUE;  // Empêcher la fermeture
 }
 
+// Dessine un petit drapeau (24x16) via Cairo et le renvoie en pixbuf. On évite les
+// emojis-drapeaux : Windows (Segoe UI Emoji) les rend en lettres « FR » / « GB ».
+static GdkPixbuf *make_flag_pixbuf(Language lang) {
+    const int w = 24, h = 16;
+    cairo_surface_t *s = cairo_image_surface_create(CAIRO_FORMAT_ARGB32, w, h);
+    cairo_t *cr = cairo_create(s);
+    if (lang == LANG_FR) {
+        cairo_set_source_rgb(cr, 0.00, 0.33, 0.64); cairo_rectangle(cr, 0, 0, w/3.0, h); cairo_fill(cr);
+        cairo_set_source_rgb(cr, 1, 1, 1);          cairo_rectangle(cr, w/3.0, 0, w/3.0, h); cairo_fill(cr);
+        cairo_set_source_rgb(cr, 0.94, 0.26, 0.21); cairo_rectangle(cr, 2*w/3.0, 0, w/3.0, h); cairo_fill(cr);
+    } else {
+        // Union Jack simplifié mais reconnaissable
+        cairo_set_source_rgb(cr, 0.00, 0.13, 0.41); cairo_paint(cr);
+        cairo_set_line_width(cr, 4); cairo_set_source_rgb(cr, 1, 1, 1);
+        cairo_move_to(cr, 0, 0); cairo_line_to(cr, w, h);
+        cairo_move_to(cr, w, 0); cairo_line_to(cr, 0, h); cairo_stroke(cr);
+        cairo_set_line_width(cr, 1.5); cairo_set_source_rgb(cr, 0.78, 0.06, 0.18);
+        cairo_move_to(cr, 0, 0); cairo_line_to(cr, w, h);
+        cairo_move_to(cr, w, 0); cairo_line_to(cr, 0, h); cairo_stroke(cr);
+        cairo_set_source_rgb(cr, 1, 1, 1);
+        cairo_rectangle(cr, w/2.0 - 3, 0, 6, h); cairo_fill(cr);
+        cairo_rectangle(cr, 0, h/2.0 - 3, w, 6); cairo_fill(cr);
+        cairo_set_source_rgb(cr, 0.78, 0.06, 0.18);
+        cairo_rectangle(cr, w/2.0 - 1.5, 0, 3, h); cairo_fill(cr);
+        cairo_rectangle(cr, 0, h/2.0 - 1.5, w, 3); cairo_fill(cr);
+    }
+    cairo_destroy(cr);
+    GdkPixbuf *pix = gdk_pixbuf_get_from_surface(s, 0, 0, w, h);
+    cairo_surface_destroy(s);
+    return pix;
+}
+
+// Pose le drapeau de la langue courante sur le bouton de langue.
+static void set_lang_button_flag(AppWidgets *app) {
+    GdkPixbuf *pix = make_flag_pixbuf(app->language);
+    GtkWidget *img = gtk_image_new_from_pixbuf(pix);
+    if (pix) g_object_unref(pix);
+    gtk_button_set_image(GTK_BUTTON(app->lang_button), img);
+    gtk_button_set_always_show_image(GTK_BUTTON(app->lang_button), TRUE);
+}
+
 // Créer la fenêtre principale
 void create_main_window(AppWidgets *app) {
     app->window = gtk_window_new(GTK_WINDOW_TOPLEVEL);
@@ -818,7 +859,7 @@ void create_main_window(AppWidgets *app) {
     gtk_box_pack_start(GTK_BOX(toolbar), app->btn_help, FALSE, FALSE, 0);
 
     // Bouton de langue avec drapeau français (par défaut) - tout à droite
-    app->lang_button = gtk_button_new_with_label("🇫🇷");
+    app->lang_button = gtk_button_new();
     g_signal_connect(app->lang_button, "clicked", G_CALLBACK(on_lang_clicked), app);
     gtk_box_pack_end(GTK_BOX(toolbar), app->lang_button, FALSE, FALSE, 0);
 
@@ -842,19 +883,15 @@ void create_main_window(AppWidgets *app) {
 
     // Initialiser la langue par défaut
     app->language = LANG_FR;
+    set_lang_button_flag(app);
 }
 
 void on_lang_clicked(GtkWidget *widget, gpointer user_data) {
     AppWidgets *app = (AppWidgets *)user_data;
 
     // Basculer la langue
-    if (app->language == LANG_FR) {
-        app->language = LANG_EN;
-        gtk_button_set_label(GTK_BUTTON(app->lang_button), "🇬🇧");
-    } else {
-        app->language = LANG_FR;
-        gtk_button_set_label(GTK_BUTTON(app->lang_button), "🇫🇷");
-    }
+    app->language = (app->language == LANG_FR) ? LANG_EN : LANG_FR;
+    set_lang_button_flag(app);
 
     // Mettre à jour l'interface
     update_interface_language(app);
