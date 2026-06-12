@@ -329,6 +329,10 @@ void on_recent_boat_activate(GtkWidget *widget, gpointer user_data);
 void on_browse_boat(GtkWidget *widget, gpointer user_data);
 void on_new_boat_clicked(GtkWidget *widget, gpointer user_data);
 
+// live.c — capture live (tail VDR qtVlm + annotations par boutons + routage polaires)
+GtkWidget *create_live_tab(AppWidgets *app);
+void live_inventory_changed(void);
+
 // win32_dialogs.c (Windows uniquement)
 #ifdef _WIN32
 wchar_t *utf8_to_wchar(const char *utf8);

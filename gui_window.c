@@ -946,6 +946,7 @@ void open_boat(AppWidgets *app, const char *folder) {
         gtk_label_set_text(GTK_LABEL(app->boat_name_label), hdr);
     }
     g_free(base);
+    live_inventory_changed();  // rafraîchit les boutons d'annotation live selon l'inventaire
 }
 
 void on_recent_boat_activate(GtkWidget *widget, gpointer user_data) {
@@ -1184,6 +1185,7 @@ void create_main_window(AppWidgets *app) {
 
     gtk_notebook_append_page(GTK_NOTEBOOK(app->notebook), data_tab, gtk_label_new("Données de la polaire"));
     gtk_notebook_append_page(GTK_NOTEBOOK(app->notebook), diagram_tab, gtk_label_new("Diagramme de la polaire"));
+    gtk_notebook_append_page(GTK_NOTEBOOK(app->notebook), create_live_tab(app), gtk_label_new("Live"));
 
     // Panneau latéral « Bateau » : nom + actions bateau + liste des polaires.
     GtkWidget *sidebar = gtk_box_new(GTK_ORIENTATION_VERTICAL, 6);
@@ -1261,7 +1263,7 @@ void update_interface_language(AppWidgets *app) {
                                      TR(app, "Polaire", "Polar"));
     gtk_notebook_set_tab_label_text(GTK_NOTEBOOK(app->notebook),
                                      gtk_notebook_get_nth_page(GTK_NOTEBOOK(app->notebook), 2),
-                                     "VMG");
+                                     "Live");
 
     // Mettre à jour les labels des boutons
     gtk_button_set_label(GTK_BUTTON(app->btn_open), TR(app, "📂 Ouvrir ▾", "📂 Open ▾"));
