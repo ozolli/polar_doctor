@@ -1,5 +1,7 @@
 #include "polar_doctor.h"
 
+static int populate_polar_selector(AppWidgets *app, const char *folder);  // défini plus bas
+
 // Calcule une grille et l'enregistre en .pol au chemin donné.
 static bool grid_to_polar_file(polar_grid_t *grid, const char *path, ProgressContext *progress) {
     double polar[PG_MAX_ANGLES][PG_MAX_SPEEDS];
@@ -29,25 +31,20 @@ static int create_routed_polars(AppWidgets *app, GSList *filenames, ProgressCont
     free_polar_grid(&dummy);
 
     char *folder = g_path_get_dirname(g_boat_config_path);
-    char first_path[BOAT_PATH_LEN] = "";
     int saved = 0;
     for (int k = 0; k < n; k++) {
         if (grids[k].point_count <= 0) continue;
         char *fn = g_strdup_printf("%s.pol", g_boat_config.polars[k].name);
         char *path = g_build_filename(folder, fn, NULL);
-        if (grid_to_polar_file(&grids[k], path, progress)) {
-            saved++;
-            if (!first_path[0]) g_strlcpy(first_path, path, sizeof(first_path));
-        }
+        if (grid_to_polar_file(&grids[k], path, progress)) saved++;
         g_free(fn);
         g_free(path);
     }
-    g_free(folder);
     for (int k = 0; k < n; k++) free_polar_grid(&grids[k]);
     g_free(grids);
 
-    if (first_path[0] && load_polar_file(first_path, app->polar_data))
-        refresh_after_polar_load(app, first_path);
+    populate_polar_selector(app, folder);  // remplit le combo + affiche la 1re polaire
+    g_free(folder);
     return saved;
 }
 
@@ -791,6 +788,45 @@ gboolean on_window_delete(GtkWidget *widget, GdkEvent *event, gpointer user_data
 
 // --- Gestion du bateau = dossier (config + polaire) ---
 
+// Charge dans la vue la polaire sélectionnée dans le combo (<dossier>/<nom>.pol).
+static void load_selected_polar(AppWidgets *app) {
+    if (!g_boat_config_path[0]) return;
+    char *name = gtk_combo_box_text_get_active_text(GTK_COMBO_BOX_TEXT(app->polar_combo));
+    if (!name) return;
+    char *folder = g_path_get_dirname(g_boat_config_path);
+    char *fn = g_strdup_printf("%s.pol", name);
+    char *path = g_build_filename(folder, fn, NULL);
+    if (load_polar_file(path, app->polar_data))
+        refresh_after_polar_load(app, path);
+    g_free(path); g_free(fn); g_free(folder); g_free(name);
+}
+
+static void on_polar_changed(GtkWidget *widget, gpointer user_data) {
+    (void)widget;
+    load_selected_polar((AppWidgets *)user_data);
+}
+
+// Remplit le sélecteur avec les polaires définies dont le .pol existe dans le dossier.
+// Charge la première (via le signal). Renvoie le nombre de polaires listées.
+static int populate_polar_selector(AppWidgets *app, const char *folder) {
+    g_signal_handlers_block_by_func(app->polar_combo, (gpointer)on_polar_changed, app);
+    gtk_combo_box_text_remove_all(GTK_COMBO_BOX_TEXT(app->polar_combo));
+    int count = 0;
+    for (int k = 0; k < g_boat_config.n_polars; k++) {
+        char *fn = g_strdup_printf("%s.pol", g_boat_config.polars[k].name);
+        char *path = g_build_filename(folder, fn, NULL);
+        if (g_file_test(path, G_FILE_TEST_IS_REGULAR)) {
+            gtk_combo_box_text_append_text(GTK_COMBO_BOX_TEXT(app->polar_combo), g_boat_config.polars[k].name);
+            count++;
+        }
+        g_free(fn); g_free(path);
+    }
+    g_signal_handlers_unblock_by_func(app->polar_combo, (gpointer)on_polar_changed, app);
+    gtk_widget_set_visible(app->polar_combo, count > 0);
+    if (count > 0) gtk_combo_box_set_active(GTK_COMBO_BOX(app->polar_combo), 0);  // déclenche le chargement
+    return count;
+}
+
 // Ouvre un bateau : charge son config (boat.cfg / <nom>.cfg) dans l'inventaire,
 // charge sa polaire, met à jour les récents et le titre de la fenêtre.
 void open_boat(AppWidgets *app, const char *folder) {
@@ -802,23 +838,26 @@ void open_boat(AppWidgets *app, const char *folder) {
         g_strlcpy(g_boat_config_path, cfg, BOAT_PATH_LEN);  // pour pré-sélection à l'enregistrement
     }
 
-    // Charger la première polaire .pol du dossier (1 polaire/bateau pour l'instant)
-    char polpath[BOAT_PATH_LEN] = "";
-    GDir *d = g_dir_open(folder, 0, NULL);
-    if (d) {
-        const char *nm;
-        while ((nm = g_dir_read_name(d))) {
-            if (g_str_has_suffix(nm, ".pol")) {
-                char *q = g_build_filename(folder, nm, NULL);
-                g_strlcpy(polpath, q, sizeof(polpath));
-                g_free(q);
-                break;
+    // Sélecteur de polaires : liste les polaires définies dont le .pol existe.
+    // Si aucune (bateau sans polaires définies), on charge la 1re polaire du dossier.
+    if (populate_polar_selector(app, folder) == 0) {
+        char polpath[BOAT_PATH_LEN] = "";
+        GDir *d = g_dir_open(folder, 0, NULL);
+        if (d) {
+            const char *nm;
+            while ((nm = g_dir_read_name(d))) {
+                if (g_str_has_suffix(nm, ".pol")) {
+                    char *q = g_build_filename(folder, nm, NULL);
+                    g_strlcpy(polpath, q, sizeof(polpath));
+                    g_free(q);
+                    break;
+                }
             }
+            g_dir_close(d);
         }
-        g_dir_close(d);
+        if (*polpath && load_polar_file(polpath, app->polar_data))
+            refresh_after_polar_load(app, polpath);
     }
-    if (*polpath && load_polar_file(polpath, app->polar_data))
-        refresh_after_polar_load(app, polpath);
 
     boat_recent_add(folder);
 
@@ -989,6 +1028,12 @@ void create_main_window(AppWidgets *app) {
     app->btn_update = gtk_button_new_with_label(TR(app, "Mettre à jour", "Update"));
     app->btn_export_pdf = gtk_button_new_with_label(TR(app, "Export PDF", "Export PDF"));
 
+    app->polar_combo = gtk_combo_box_text_new();
+    gtk_widget_set_tooltip_text(app->polar_combo,
+        TR(app, "Polaire du bateau à afficher", "Boat polar to display"));
+    gtk_widget_set_no_show_all(app->polar_combo, TRUE);  // visible seulement si le bateau a des polaires
+    g_signal_connect(app->polar_combo, "changed", G_CALLBACK(on_polar_changed), app);
+
     g_signal_connect(app->btn_open, "clicked", G_CALLBACK(on_open_menu), app);
     g_signal_connect(app->btn_new_boat, "clicked", G_CALLBACK(on_new_boat_clicked), app);
     g_signal_connect(app->btn_save, "clicked", G_CALLBACK(on_save_clicked), app);
@@ -998,6 +1043,7 @@ void create_main_window(AppWidgets *app) {
 
     gtk_box_pack_start(GTK_BOX(toolbar), app->btn_open, FALSE, FALSE, 0);
     gtk_box_pack_start(GTK_BOX(toolbar), app->btn_new_boat, FALSE, FALSE, 0);
+    gtk_box_pack_start(GTK_BOX(toolbar), app->polar_combo, FALSE, FALSE, 0);
     gtk_box_pack_start(GTK_BOX(toolbar), app->btn_save, FALSE, FALSE, 0);
     gtk_box_pack_start(GTK_BOX(toolbar), app->btn_create, FALSE, FALSE, 0);
     gtk_box_pack_start(GTK_BOX(toolbar), app->btn_update, FALSE, FALSE, 0);
