@@ -1081,7 +1081,7 @@ void create_main_window(AppWidgets *app) {
     app->language = LANG_FR;  // doit être posé AVANT la création des onglets (qui utilisent TR)
     app->window = gtk_window_new(GTK_WINDOW_TOPLEVEL);
     gtk_window_set_title(GTK_WINDOW(app->window), "Polar Doctor");
-    gtk_window_set_default_size(GTK_WINDOW(app->window), 1400, 720);
+    gtk_window_set_default_size(GTK_WINDOW(app->window), 1250, 720);
 
     // Définir l'icône de la fenêtre
     GError *error = NULL;

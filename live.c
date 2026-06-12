@@ -29,12 +29,14 @@ static LiveSession L;
 
 // --- état des boutons ---------------------------------------------------------
 
-static void on_live_radio(GtkToggleButton *b, gpointer dim) {
-    if (!gtk_toggle_button_get_active(b)) return;
-    const char *term = g_object_get_data(G_OBJECT(b), "term");
-    char *dst = (GPOINTER_TO_INT(dim) == 0) ? L.cur_main
-              : (GPOINTER_TO_INT(dim) == 1) ? L.cur_head : L.cur_sea;
-    g_strlcpy(dst, term ? term : "", BOAT_TERM_LEN);
+static void on_live_combo(GtkWidget *w, gpointer dimp) {
+    int dim = GPOINTER_TO_INT(dimp);
+    int idx = gtk_combo_box_get_active(GTK_COMBO_BOX(w));
+    char *dst = (dim == 0) ? L.cur_main : (dim == 1) ? L.cur_head : L.cur_sea;
+    if (idx <= 0) { dst[0] = 0; return; }   // « (aucun) »
+    char (*inv)[BOAT_TERM_LEN] = (dim == 0) ? g_boat_config.mainsail
+                               : (dim == 1) ? g_boat_config.headsail : g_boat_config.seastate;
+    g_strlcpy(dst, inv[idx - 1], BOAT_TERM_LEN);   // index 0 = (aucun)
 }
 
 static void on_live_moteur(GtkToggleButton *b, gpointer unused) {
@@ -42,27 +44,26 @@ static void on_live_moteur(GtkToggleButton *b, gpointer unused) {
     L.moteur = gtk_toggle_button_get_active(b);
 }
 
-// Une ligne de boutons radio (dim 0=GV, 1=voile d'avant, 2=mer) ; premier = « (?) ».
+// Un choix = un libellé + une liste déroulante (index 0 = « (aucun) »).
+// dim : 0=GV, 1=voile d'avant, 2=état de mer.
 static void build_radio_row(GtkWidget *box, const char *title,
                             char inv[][BOAT_TERM_LEN], int n, gboolean is_sea, int dim) {
-    GtkWidget *row = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 4);
+    GtkWidget *row = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 6);
     GtkWidget *lbl = gtk_label_new(title);
-    gtk_widget_set_size_request(lbl, 110, -1);
+    gtk_widget_set_size_request(lbl, 95, -1);
     gtk_label_set_xalign(GTK_LABEL(lbl), 0.0);
     gtk_box_pack_start(GTK_BOX(row), lbl, FALSE, FALSE, 0);
 
-    GtkWidget *first = gtk_radio_button_new_with_label(NULL, "(?)");
-    g_object_set_data(G_OBJECT(first), "term", (gpointer)"");
-    g_signal_connect(first, "toggled", G_CALLBACK(on_live_radio), GINT_TO_POINTER(dim));
-    gtk_box_pack_start(GTK_BOX(row), first, FALSE, FALSE, 0);
-
+    GtkWidget *combo = gtk_combo_box_text_new();
+    gtk_combo_box_text_append_text(GTK_COMBO_BOX_TEXT(combo), TR(L.app, "(aucun)", "(none)"));
     for (int i = 0; i < n; i++) {
         const char *disp = is_sea ? sea_state_label(inv[i], L.app->language) : inv[i];
-        GtkWidget *r = gtk_radio_button_new_with_label_from_widget(GTK_RADIO_BUTTON(first), disp);
-        g_object_set_data_full(G_OBJECT(r), "term", g_strdup(inv[i]), g_free);
-        g_signal_connect(r, "toggled", G_CALLBACK(on_live_radio), GINT_TO_POINTER(dim));
-        gtk_box_pack_start(GTK_BOX(row), r, FALSE, FALSE, 0);
+        gtk_combo_box_text_append_text(GTK_COMBO_BOX_TEXT(combo), disp);
     }
+    gtk_combo_box_set_active(GTK_COMBO_BOX(combo), 0);
+    g_signal_connect(combo, "changed", G_CALLBACK(on_live_combo), GINT_TO_POINTER(dim));
+    gtk_box_pack_start(GTK_BOX(row), combo, TRUE, TRUE, 0);
+
     gtk_box_pack_start(GTK_BOX(box), row, FALSE, FALSE, 0);
 }
 
@@ -264,30 +265,38 @@ GtkWidget *create_live_tab(AppWidgets *app) {
     memset(&L, 0, sizeof(L));
     L.app = app;
 
-    GtkWidget *box = gtk_box_new(GTK_ORIENTATION_VERTICAL, 8);
-    gtk_container_set_border_width(GTK_CONTAINER(box), 10);
+    GtkWidget *box = gtk_box_new(GTK_ORIENTATION_VERTICAL, 6);
+    gtk_container_set_border_width(GTK_CONTAINER(box), 8);
+    gtk_widget_set_size_request(box, 250, -1);  // colonne étroite à droite du diagramme
 
-    GtkWidget *src = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 6);
-    gtk_box_pack_start(GTK_BOX(src), gtk_label_new(TR(app, "VDR qtVlm :", "qtVlm VDR:")), FALSE, FALSE, 0);
+    GtkWidget *title = gtk_label_new(TR(app, "Capture live", "Live capture"));
+    gtk_label_set_xalign(GTK_LABEL(title), 0.0);
+    PangoAttrList *tb = pango_attr_list_new();
+    pango_attr_list_insert(tb, pango_attr_weight_new(PANGO_WEIGHT_BOLD));
+    gtk_label_set_attributes(GTK_LABEL(title), tb);
+    pango_attr_list_unref(tb);
+    gtk_box_pack_start(GTK_BOX(box), title, FALSE, FALSE, 0);
+
+    GtkWidget *plabel = gtk_label_new(TR(app, "VDR qtVlm :", "qtVlm VDR:"));
+    gtk_label_set_xalign(GTK_LABEL(plabel), 0.0);
+    gtk_box_pack_start(GTK_BOX(box), plabel, FALSE, FALSE, 0);
     L.path_entry = gtk_entry_new();
+    gtk_entry_set_width_chars(GTK_ENTRY(L.path_entry), 12);  // ne dicte pas la largeur
     char *def = g_build_filename(g_get_home_dir(), ".qtVlm", "vdrs", "vdr.db", NULL);
     gtk_entry_set_text(GTK_ENTRY(L.path_entry), def);
     g_free(def);
-    gtk_box_pack_start(GTK_BOX(src), L.path_entry, TRUE, TRUE, 0);
+    gtk_box_pack_start(GTK_BOX(box), L.path_entry, FALSE, FALSE, 0);
+
     L.toggle = gtk_button_new_with_label(TR(app, "⏺ Démarrer", "⏺ Start"));
     g_signal_connect(L.toggle, "clicked", G_CALLBACK(on_live_toggle), NULL);
-    gtk_box_pack_start(GTK_BOX(src), L.toggle, FALSE, FALSE, 0);
-    gtk_box_pack_start(GTK_BOX(box), src, FALSE, FALSE, 0);
+    gtk_box_pack_start(GTK_BOX(box), L.toggle, FALSE, FALSE, 0);
 
     L.readout = gtk_label_new(TR(app, "Arrêté.", "Stopped."));
     gtk_label_set_xalign(GTK_LABEL(L.readout), 0.0);
+    gtk_label_set_line_wrap(GTK_LABEL(L.readout), TRUE);
     gtk_box_pack_start(GTK_BOX(box), L.readout, FALSE, FALSE, 0);
 
-    GtkWidget *hint = gtk_label_new(
-        TR(app, "Annoter en direct (les commentaires du VDR sont ignorés en live) :",
-               "Annotate live (VDR comments are ignored in live mode):"));
-    gtk_label_set_xalign(GTK_LABEL(hint), 0.0);
-    gtk_box_pack_start(GTK_BOX(box), hint, FALSE, FALSE, 0);
+    gtk_box_pack_start(GTK_BOX(box), gtk_separator_new(GTK_ORIENTATION_HORIZONTAL), FALSE, FALSE, 2);
 
     L.controls_box = gtk_box_new(GTK_ORIENTATION_VERTICAL, 4);
     gtk_box_pack_start(GTK_BOX(box), L.controls_box, FALSE, FALSE, 0);
