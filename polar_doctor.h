@@ -101,6 +101,10 @@ typedef struct {
     bool has_tws, has_twa, has_bsp;
     double sog;
     bool has_sog;
+    double twd;       // direction vraie du vent (MWD) ; TWA = TWD - cap
+    bool has_twd;
+    double heading;   // cap vrai (HDT/HDG/VHW)
+    bool has_heading;
 } nmea_data_t;
 
 // Filtre de débruitage STW (offset courant STW-SOG suivi par EMA).

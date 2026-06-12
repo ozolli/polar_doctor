@@ -98,6 +98,23 @@ void parse_sog_sentence(const char *type, char **f, int nf, nmea_data_t *data) {
     }
 }
 
+// Vitesse de vent ramenée en nœuds selon l'unité ('N'=nœuds, 'M'=m/s, 'K'=km/h).
+static double wind_to_knots(double v, char unit) {
+    if (unit == 'M') return v * 1.943844;   // m/s -> nœuds
+    if (unit == 'K') return v / 1.852;       // km/h -> nœuds
+    return v;                                 // 'N' (ou défaut) : déjà en nœuds
+}
+
+// TWA = direction vraie du vent − cap, ramené à [0,180]. Mis à jour dès qu'on a les deux.
+static void nmea_update_twa(nmea_data_t *d) {
+    if (!d->has_twd || !d->has_heading) return;
+    double rel = d->twd - d->heading;
+    while (rel > 180.0) rel -= 360.0;
+    while (rel < -180.0) rel += 360.0;
+    d->twa = fabs(rel);
+    d->has_twa = true;
+}
+
 bool parse_nmea_sentence(const char *sentence, nmea_data_t *data) {
     char line[PG_MAX_LINE];
     strncpy(line, sentence, PG_MAX_LINE - 1);
@@ -123,32 +140,60 @@ bool parse_nmea_sentence(const char *sentence, nmea_data_t *data) {
     if (nf < 1) return false;
     const char *type = fields[0];
 
-    if (strstr(type, "MWV")) {                 // angle(1) ref(2) vitesse(3) unité(4)
+    // Émet un point dès que TWA+TWS+STW sont réunis — mais seulement sur les trames
+    // vent/vitesse/cap (pas sur les trames SOG), pour ne pas surcompter.
+    #define LIVE_COMPLETE() (data->has_twa && data->has_tws && data->has_bsp)
+
+    if (strstr(type, "MWV")) {                 // vent vrai : angle(1) ref(2)=T vitesse(3) unité(4)
         double angle, speed;
         if (nf > 4 && nmea_field_num(fields, nf, 1, &angle) &&
             nmea_field_num(fields, nf, 3, &speed) &&
-            fields[2][0] == 'T' && speed > 0.1 && fields[4][0] == 'N') {
+            fields[2][0] == 'T' && speed > 0.1) {
             data->twa = fabs(angle);
-            data->tws = speed;
+            data->tws = wind_to_knots(speed, fields[4][0]);
             data->has_twa = true;
             data->has_tws = true;
-            if (data->has_bsp) return true;
+            if (LIVE_COMPLETE()) return true;
+        }
+    }
+    else if (strstr(type, "MWD")) {            // dir vraie(1)=T, vitesse nœuds(5)/N ou m/s(7)/M
+        double dir, speed;
+        if (nf > 2 && nmea_field_num(fields, nf, 1, &dir) && fields[2][0] == 'T') {
+            data->twd = dir;
+            data->has_twd = true;
+            if (nmea_field_num(fields, nf, 5, &speed) && speed > 0.1) {
+                data->tws = speed; data->has_tws = true;                      // nœuds
+            } else if (nmea_field_num(fields, nf, 7, &speed) && speed > 0.1) {
+                data->tws = wind_to_knots(speed, 'M'); data->has_tws = true;  // m/s
+            }
+            nmea_update_twa(data);             // TWA = TWD - cap (si cap connu)
+            if (LIVE_COMPLETE()) return true;
+        }
+    }
+    else if (strstr(type, "HDT") || strstr(type, "HDG")) {  // cap vrai au champ 1
+        double hd;
+        if (nmea_field_num(fields, nf, 1, &hd)) {
+            data->heading = hd; data->has_heading = true;
+            nmea_update_twa(data);
+            if (LIVE_COMPLETE()) return true;
         }
     }
     else if (strstr(type, "VHW")) {            // STW nœuds au champ 5, unité 'N' au champ 6
         double speed;
-        if (nf > 6 && fields[6][0] == 'N' && nmea_field_num(fields, nf, 5, &speed) &&
-            speed > 0.1) {
+        if (nf > 1 && fields[1][0] && nmea_field_num(fields, nf, 1, &speed)) {  // cap vrai (champ 1)
+            data->heading = speed; data->has_heading = true; nmea_update_twa(data);
+        }
+        if (nf > 6 && fields[6][0] == 'N' && nmea_field_num(fields, nf, 5, &speed) && speed > 0.1) {
             data->bsp = speed;
             data->has_bsp = true;
-            if (data->has_twa && data->has_tws) return true;
+            if (LIVE_COMPLETE()) return true;
         }
     }
     else {
-        // Trames porteuses de SOG : mettent à jour l'état SOG sans « compléter » de
-        // point (le point reste déclenché par la paire MWV+VHW).
+        // Trames porteuses de SOG : mettent à jour l'état SOG sans « compléter » de point.
         parse_sog_sentence(type, fields, nf, data);
     }
+    #undef LIVE_COMPLETE
     return false;
 }
 
