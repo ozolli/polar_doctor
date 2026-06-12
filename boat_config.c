@@ -21,6 +21,44 @@ void boat_list_add(char list[][BOAT_TERM_LEN], int *n, const char *term) {
     (*n)++;
 }
 
+// Découpe une CSV en liste (trim, ignore vide et « * » qui signifie « tout »).
+static void boat_csv_to_list(const char *csv, char list[][BOAT_TERM_LEN], int *n) {
+    *n = 0;
+    char buf[256];
+    g_strlcpy(buf, csv ? csv : "", sizeof(buf));
+    char *sp = NULL;
+    for (char *tok = strtok_r(buf, ",", &sp); tok; tok = strtok_r(NULL, ",", &sp)) {
+        char *t = boat_str_trim(tok);
+        if (*t && strcmp(t, "*") != 0) boat_list_add(list, n, t);
+    }
+}
+
+// Joint une liste en CSV, ou « * » si vide.
+static const char *boat_list_to_csv(const char list[][BOAT_TERM_LEN], int n, char *buf, size_t sz) {
+    if (n <= 0) { g_strlcpy(buf, "*", sz); return buf; }
+    buf[0] = 0;
+    for (int i = 0; i < n; i++) {
+        if (i) g_strlcat(buf, ", ", sz);
+        g_strlcat(buf, list[i], sz);
+    }
+    return buf;
+}
+
+static bool boat_in_list(const char list[][BOAT_TERM_LEN], int n, const char *val) {
+    if (n == 0) return true;            // dimension non contrainte = tout
+    if (!val || !*val) return false;    // contrainte mais valeur courante inconnue
+    for (int i = 0; i < n; i++)
+        if (g_ascii_strcasecmp(list[i], val) == 0) return true;
+    return false;
+}
+
+bool polar_def_matches(const PolarDef *pd, const char *cur_main,
+                       const char *cur_head, const char *cur_sea) {
+    return boat_in_list(pd->mains, pd->n_mains, cur_main)
+        && boat_in_list(pd->heads, pd->n_heads, cur_head)
+        && boat_in_list(pd->seas,  pd->n_seas,  cur_sea);
+}
+
 // Charge un boat.cfg (format INI). true si le fichier a pu être lu.
 bool boat_config_load(BoatConfig *c, const char *path) {
     FILE *f = fopen(path, "r");
@@ -50,6 +88,25 @@ bool boat_config_load(BoatConfig *c, const char *path) {
             boat_list_add(c->headsail, &c->n_headsail, p);
         } else if (strcmp(section, "seastates") == 0) {
             boat_list_add(c->seastate, &c->n_seastate, p);
+        } else if (strcmp(section, "polars") == 0) {
+            char *eq = strchr(p, '=');
+            if (!eq || c->n_polars >= BOAT_MAX_POLARS) continue;
+            *eq = 0;
+            PolarDef *pd = &c->polars[c->n_polars];
+            memset(pd, 0, sizeof(*pd));
+            g_strlcpy(pd->name, boat_str_trim(p), sizeof(pd->name));
+            char *sp = NULL;                       // segments « clé: csv » séparés par ';'
+            for (char *seg = strtok_r(eq + 1, ";", &sp); seg; seg = strtok_r(NULL, ";", &sp)) {
+                char *colon = strchr(seg, ':');
+                if (!colon) continue;
+                *colon = 0;
+                char *key = boat_str_trim(seg);
+                char *csv = colon + 1;
+                if (strcmp(key, "mains") == 0)      boat_csv_to_list(csv, pd->mains, &pd->n_mains);
+                else if (strcmp(key, "heads") == 0) boat_csv_to_list(csv, pd->heads, &pd->n_heads);
+                else if (strcmp(key, "seas") == 0)  boat_csv_to_list(csv, pd->seas,  &pd->n_seas);
+            }
+            c->n_polars++;
         }
     }
     fclose(f);
@@ -67,6 +124,17 @@ bool boat_config_save(const BoatConfig *c, const char *path) {
     fprintf(f, "\n[seastates]           ; états de mer\n");
     for (int i = 0; i < c->n_seastate; i++) fprintf(f, "%s\n", c->seastate[i]);
     fprintf(f, "\n[engine]\nmoteur = %s\ncharge = %s\n", c->kw_moteur, c->kw_charge);
+    if (c->n_polars > 0) {
+        char b1[256], b2[256], b3[256];
+        fprintf(f, "\n[polars]              ; nom = mains: … ; heads: … ; seas: …  (* = tout)\n");
+        for (int i = 0; i < c->n_polars; i++) {
+            const PolarDef *pd = &c->polars[i];
+            fprintf(f, "%s = mains: %s ; heads: %s ; seas: %s\n", pd->name,
+                    boat_list_to_csv(pd->mains, pd->n_mains, b1, sizeof(b1)),
+                    boat_list_to_csv(pd->heads, pd->n_heads, b2, sizeof(b2)),
+                    boat_list_to_csv(pd->seas,  pd->n_seas,  b3, sizeof(b3)));
+        }
+    }
     fclose(f);
     return true;
 }

@@ -69,6 +69,18 @@ extern int g_polar_percentile;
 // ---- Configuration du bateau (inventaire voiles / états de mer + mots-clés moteur) ----
 #define BOAT_MAX_ITEMS 32
 #define BOAT_TERM_LEN  48
+#define BOAT_MAX_POLARS 16
+
+// Une polaire du bateau = un nom + des critères de routage par dimension.
+// Liste vide sur une dimension = « tout » (pas de contrainte). Un point est routé
+// vers la polaire si sa GV ∈ mains (ou vide) ET sa voile d'avant ∈ heads (ou vide)
+// ET son état de mer ∈ seas (ou vide).
+typedef struct {
+    char name[64];
+    char mains[BOAT_MAX_ITEMS][BOAT_TERM_LEN]; int n_mains;  // états de GV concernés
+    char heads[BOAT_MAX_ITEMS][BOAT_TERM_LEN]; int n_heads;  // voiles d'avant concernées
+    char seas[BOAT_MAX_ITEMS][BOAT_TERM_LEN];  int n_seas;   // états de mer concernés
+} PolarDef;
 
 typedef struct {
     char name[128];
@@ -77,6 +89,7 @@ typedef struct {
     char seastate[BOAT_MAX_ITEMS][BOAT_TERM_LEN]; int n_seastate;  // états de mer
     char kw_moteur[BOAT_TERM_LEN];   // moteur embrayé -> exclure
     char kw_charge[BOAT_TERM_LEN];   // charge batteries débrayé -> garder
+    PolarDef polars[BOAT_MAX_POLARS]; int n_polars;  // polaires définies pour ce bateau
 } BoatConfig;
 
 extern BoatConfig g_boat_config;
@@ -206,6 +219,9 @@ bool boat_find_config(const char *folder, char *out, size_t outsz);
 // Liste des bateaux récents (chemins de dossiers), le plus récent en tête.
 int boat_recent_load(char list[][BOAT_PATH_LEN], int max);
 void boat_recent_add(const char *boat_folder);
+// Une polaire matche-t-elle l'état courant (GV / voile d'avant / état de mer) ?
+bool polar_def_matches(const PolarDef *pd, const char *cur_main,
+                       const char *cur_head, const char *cur_sea);
 
 // import.c
 void stw_sog_reset(stw_sog_filter_t *f);
