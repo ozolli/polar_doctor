@@ -130,6 +130,28 @@ static void live_refresh_display(void) {
     compute_polar(&L.grids[idx], polar, NULL);
     load_polar_from_grid(L.app->polar_data, &L.grids[idx], polar);
     rebuild_data_tab(L.app);
+
+    // Quand de nouvelles colonnes TWS apparaissent (ou qu'on change de polaire),
+    // recouvrir TOUTE la plage TWS pour ne pas masquer les hauts vents enregistrés.
+    static int prev_speeds = -1, prev_idx = -1;
+    if (L.app->polar_data->num_speeds != prev_speeds || idx != prev_idx) {
+        prev_speeds = L.app->polar_data->num_speeds;
+        prev_idx = idx;
+        gtk_combo_box_text_remove_all(GTK_COMBO_BOX_TEXT(L.app->tws_from_combo));
+        gtk_combo_box_text_remove_all(GTK_COMBO_BOX_TEXT(L.app->tws_to_combo));
+        int cnt = 0;
+        for (int i = 0; i < L.app->polar_data->num_speeds; i++) {
+            int tws = L.app->polar_data->tws_values[i];
+            if (tws == 0) continue;
+            char t[16]; snprintf(t, sizeof(t), "%d kn", tws);
+            gtk_combo_box_text_append_text(GTK_COMBO_BOX_TEXT(L.app->tws_from_combo), t);
+            gtk_combo_box_text_append_text(GTK_COMBO_BOX_TEXT(L.app->tws_to_combo), t);
+            cnt++;
+        }
+        gtk_combo_box_set_active(GTK_COMBO_BOX(L.app->tws_from_combo), 0);
+        gtk_combo_box_set_active(GTK_COMBO_BOX(L.app->tws_to_combo), cnt - 1);  // tout afficher
+    }
+
     rebuild_vmg_table(L.app);
     gtk_widget_queue_draw(L.app->polar_view);
 
