@@ -210,6 +210,30 @@ gboolean draw_polar_diagram(GtkWidget *widget, cairo_t *cr, gpointer user_data) 
         draw_tws_curve(cr, data, tws, center_x, center_y, radius, max_scale, cr_, cg_, cb_);
     }
 
+    // Capture live : superposer le nuage de mesures brutes (vu grandir en temps réel)
+    // et le point courant.
+    if (g_live_grid) {
+        cairo_set_source_rgba(cr, 0.10, 0.10, 0.10, 0.45);
+        for (int a = 0; a < PG_MAX_ANGLES; a++) {
+            for (int s = 0; s < PG_MAX_SPEEDS; s++) {
+                for (data_point_t *p = g_live_grid->points[a][s]; p; p = p->next) {
+                    if (p->bsp <= 0) continue;
+                    double rad = a * M_PI / 180.0;
+                    double r = (p->bsp / max_scale) * radius;
+                    cairo_arc(cr, center_x + r * sin(rad), center_y - r * cos(rad), 1.6, 0, 2 * M_PI);
+                    cairo_fill(cr);
+                }
+            }
+        }
+        if (g_live_cur_bsp > 0) {  // point courant (rouge vif)
+            double rad = g_live_cur_twa * M_PI / 180.0;
+            double r = (g_live_cur_bsp / max_scale) * radius;
+            cairo_set_source_rgb(cr, 0.90, 0.10, 0.10);
+            cairo_arc(cr, center_x + r * sin(rad), center_y - r * cos(rad), 4.0, 0, 2 * M_PI);
+            cairo_fill(cr);
+        }
+    }
+
     return FALSE;
 }
 

@@ -122,6 +122,9 @@ static int live_displayed_index(void) {
 static void live_refresh_display(void) {
     int idx = live_displayed_index();
     if (idx < 0 || idx >= L.n) return;
+    g_live_grid = &L.grids[idx];          // nuage de points superposé sur le diagramme
+    g_live_cur_twa = L.last_twa;
+    g_live_cur_bsp = L.last_stw;
     double polar[PG_MAX_ANGLES][PG_MAX_SPEEDS];
     compute_polar(&L.grids[idx], polar, NULL);
     load_polar_from_grid(L.app->polar_data, &L.grids[idx], polar);
@@ -187,6 +190,8 @@ static void live_stop(void) {
     if (!L.active) return;
     if (L.timer_id) { g_source_remove(L.timer_id); L.timer_id = 0; }
     L.active = FALSE;
+    g_live_grid = NULL; g_live_cur_bsp = 0;   // retire le nuage live du diagramme
+    gtk_widget_queue_draw(L.app->polar_view);
     live_save_all();
     if (L.db) { sqlite3_close(L.db); L.db = NULL; }
     for (int k = 0; k < L.n; k++) free_polar_grid(&L.grids[k]);

@@ -132,6 +132,11 @@ typedef struct {
 
 extern polar_router_t *g_polar_router;
 
+// Visualisation live : grille dont on superpose les points bruts sur le diagramme
+// (NULL hors capture), + point courant (bsp <= 0 = aucun).
+extern polar_grid_t *g_live_grid;
+extern double g_live_cur_twa, g_live_cur_bsp;
+
 typedef struct {
     GtkWidget *dialog;
     GtkWidget *label;
