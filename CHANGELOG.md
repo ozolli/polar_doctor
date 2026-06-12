@@ -2,12 +2,12 @@
 
 Toutes les modifications notables du projet seront documentées dans ce fichier.
 
-## [1.2.0] - Non publiée (en cours)
-
-> En cours : finalisation des **mots-clés de commentaire VDR** (état de mer, voilure, points cibles)
-> avant publication.
+## [1.2.0] - 2026-06-12
 
 ### Ajouté
+- ✅ **Configuration du bateau** : inventaire éditable (grand-voile, voiles d'avant, états de
+  mer) + mots-clés moteur, stocké dans `boat.cfg` (INI), via un éditeur graphique (bouton « Bateau… »).
+  Première brique du futur routage multi-polaires par voilure / état de mer
 - ✅ **Lissage glissant du STW** à l'import NMEA (moyenne mobile, anti-bruit du loch ;
   garde anti-manœuvre : pas de lissage à travers un virement/empannage)
 - ✅ **Débruitage du STW par le SOG** (VDR et NMEA) : suit l'écart STW–SOG (qui ne varie
@@ -31,6 +31,11 @@ Toutes les modifications notables du projet seront documentées dans ce fichier.
   packaging ne copiait pas les **dépendances des loaders gdk-pixbuf** (chargés dynamiquement,
   invisibles à `ldd`). Sans `librsvg-2-2.dll` & co., GTK échouait fatalement au chargement de
   l'icône SVG du thème. La CI copie désormais ces dépendances (+ `gdbus.exe`, schémas compilés)
+
+### Interne
+- 🔧 Découpe de `polar_doctor.c` (~4600 lignes) en modules — `import.c`, `polar_data.c`,
+  `diagram.c`, `gui_tabs.c`, `gui_window.c`, `export_pdf.c`, `boat_config.c`, `win32_dialogs.c`,
+  `main.c` + header commun `polar_doctor.h`. Build : `gcc *.c` / `make`. Aucun changement fonctionnel
 
 ## [1.1.0] - 2026-06-11
 
