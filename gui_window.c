@@ -1348,6 +1348,157 @@ void boat_dialog_collect(GtkWidget *name_e, GtkWidget *mot_e, GtkWidget *chg_e,
     g_boat_config.n_seastate = boat_textview_get(tv_sea,  g_boat_config.seastate);
 }
 
+// Contexte partagé par les callbacks d'édition des polaires (dialogue modal -> vit
+// pendant tout gtk_dialog_run, donc un pointeur vers une variable locale est valide).
+typedef struct {
+    GtkWidget *dialog;
+    GtkWidget *polars_box;
+    GtkTextView *tv_main, *tv_head, *tv_sea;
+    AppWidgets *app;
+} BoatDlgCtx;
+
+static void rebuild_polars_box(BoatDlgCtx *ctx);
+static void edit_polar_popup(BoatDlgCtx *ctx, int idx);
+static void on_polar_edit_clicked(GtkWidget *btn, gpointer ud);
+static void on_polar_del_clicked(GtkWidget *btn, gpointer ud);
+
+// Colonne de cases à cocher : une par terme de l'inventaire, pré-cochée si présente
+// dans sel. Les widgets sont retournés dans checks[]. Pour les états de mer, on affiche
+// le libellé localisé (FR stocké, EN affiché si langue anglaise).
+static GtkWidget *boat_check_column(const char *title, char inv[][BOAT_TERM_LEN], int n_inv,
+                                    char sel[][BOAT_TERM_LEN], int n_sel,
+                                    GtkWidget **checks, Language lang, bool is_sea) {
+    GtkWidget *frame = gtk_frame_new(title);
+    GtkWidget *box = gtk_box_new(GTK_ORIENTATION_VERTICAL, 2);
+    for (int i = 0; i < n_inv; i++) {
+        const char *disp = is_sea ? sea_state_label(inv[i], lang) : inv[i];
+        checks[i] = gtk_check_button_new_with_label(disp);
+        for (int j = 0; j < n_sel; j++)
+            if (g_ascii_strcasecmp(inv[i], sel[j]) == 0) {
+                gtk_toggle_button_set_active(GTK_TOGGLE_BUTTON(checks[i]), TRUE);
+                break;
+            }
+        gtk_box_pack_start(GTK_BOX(box), checks[i], FALSE, FALSE, 0);
+    }
+    gtk_container_add(GTK_CONTAINER(frame), box);
+    return frame;
+}
+
+static int boat_check_read(GtkWidget **checks, char inv[][BOAT_TERM_LEN], int n_inv,
+                           char out[][BOAT_TERM_LEN]) {
+    int n = 0;
+    for (int i = 0; i < n_inv; i++)
+        if (gtk_toggle_button_get_active(GTK_TOGGLE_BUTTON(checks[i])))
+            boat_list_add(out, &n, inv[i]);
+    return n;
+}
+
+// Pop-up d'édition d'une polaire : nom + 3 colonnes de cases (GV / voiles d'avant / mer).
+static void edit_polar_popup(BoatDlgCtx *ctx, int idx) {
+    AppWidgets *app = ctx->app;
+    // Resynchroniser l'inventaire depuis les zones texte (l'utilisateur a pu l'éditer).
+    g_boat_config.n_mainsail = boat_textview_get(ctx->tv_main, g_boat_config.mainsail);
+    g_boat_config.n_headsail = boat_textview_get(ctx->tv_head, g_boat_config.headsail);
+    g_boat_config.n_seastate = boat_textview_get(ctx->tv_sea,  g_boat_config.seastate);
+    PolarDef *pd = &g_boat_config.polars[idx];
+
+    GtkWidget *dlg = gtk_dialog_new_with_buttons(TR(app, "Définition de la polaire", "Polar definition"),
+        GTK_WINDOW(ctx->dialog), GTK_DIALOG_MODAL | GTK_DIALOG_DESTROY_WITH_PARENT,
+        TR(app, "_Annuler", "_Cancel"), GTK_RESPONSE_CANCEL,
+        TR(app, "_OK", "_OK"), GTK_RESPONSE_OK, NULL);
+    GtkWidget *cont = gtk_dialog_get_content_area(GTK_DIALOG(dlg));
+    gtk_box_set_spacing(GTK_BOX(cont), 6);
+
+    GtkWidget *nb = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 6);
+    gtk_box_pack_start(GTK_BOX(nb), gtk_label_new(TR(app, "Nom :", "Name:")), FALSE, FALSE, 0);
+    GtkWidget *name = gtk_entry_new();
+    gtk_entry_set_text(GTK_ENTRY(name), pd->name);
+    gtk_box_pack_start(GTK_BOX(nb), name, TRUE, TRUE, 0);
+    gtk_box_pack_start(GTK_BOX(cont), nb, FALSE, FALSE, 0);
+
+    GtkWidget *cols = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 8);
+    GtkWidget *cm[BOAT_MAX_ITEMS], *ch[BOAT_MAX_ITEMS], *cs[BOAT_MAX_ITEMS];
+    gtk_box_pack_start(GTK_BOX(cols), boat_check_column(TR(app, "Grand-voile", "Mainsail"),
+        g_boat_config.mainsail, g_boat_config.n_mainsail, pd->mains, pd->n_mains, cm, app->language, false), TRUE, TRUE, 0);
+    gtk_box_pack_start(GTK_BOX(cols), boat_check_column(TR(app, "Voiles d'avant", "Headsails"),
+        g_boat_config.headsail, g_boat_config.n_headsail, pd->heads, pd->n_heads, ch, app->language, false), TRUE, TRUE, 0);
+    gtk_box_pack_start(GTK_BOX(cols), boat_check_column(TR(app, "États de mer", "Sea states"),
+        g_boat_config.seastate, g_boat_config.n_seastate, pd->seas, pd->n_seas, cs, app->language, true), TRUE, TRUE, 0);
+    gtk_box_pack_start(GTK_BOX(cont), cols, TRUE, TRUE, 0);
+
+    GtkWidget *hint = gtk_label_new(TR(app, "Rien de coché sur une colonne = toutes ses valeurs.",
+                                            "Nothing checked in a column = all its values."));
+    gtk_label_set_xalign(GTK_LABEL(hint), 0.0);
+    gtk_box_pack_start(GTK_BOX(cont), hint, FALSE, FALSE, 0);
+
+    gtk_widget_show_all(dlg);
+    if (gtk_dialog_run(GTK_DIALOG(dlg)) == GTK_RESPONSE_OK) {
+        g_strlcpy(pd->name, gtk_entry_get_text(GTK_ENTRY(name)), sizeof(pd->name));
+        pd->n_mains = boat_check_read(cm, g_boat_config.mainsail, g_boat_config.n_mainsail, pd->mains);
+        pd->n_heads = boat_check_read(ch, g_boat_config.headsail, g_boat_config.n_headsail, pd->heads);
+        pd->n_seas  = boat_check_read(cs, g_boat_config.seastate, g_boat_config.n_seastate, pd->seas);
+    }
+    gtk_widget_destroy(dlg);
+    rebuild_polars_box(ctx);
+}
+
+static void on_polar_edit_clicked(GtkWidget *btn, gpointer ud) {
+    edit_polar_popup((BoatDlgCtx *)ud, GPOINTER_TO_INT(g_object_get_data(G_OBJECT(btn), "idx")));
+}
+
+static void on_polar_del_clicked(GtkWidget *btn, gpointer ud) {
+    BoatDlgCtx *ctx = (BoatDlgCtx *)ud;
+    int idx = GPOINTER_TO_INT(g_object_get_data(G_OBJECT(btn), "idx"));
+    for (int i = idx; i < g_boat_config.n_polars - 1; i++)
+        g_boat_config.polars[i] = g_boat_config.polars[i + 1];
+    if (g_boat_config.n_polars > 0) g_boat_config.n_polars--;
+    rebuild_polars_box(ctx);
+}
+
+static void on_polar_add_clicked(GtkWidget *btn, gpointer ud) {
+    (void)btn;
+    BoatDlgCtx *ctx = (BoatDlgCtx *)ud;
+    if (g_boat_config.n_polars >= BOAT_MAX_POLARS) return;
+    PolarDef *pd = &g_boat_config.polars[g_boat_config.n_polars];
+    memset(pd, 0, sizeof(*pd));
+    snprintf(pd->name, sizeof(pd->name), "%s %d",
+             ctx->app->language == LANG_FR ? "Polaire" : "Polar", g_boat_config.n_polars + 1);
+    g_boat_config.n_polars++;
+    edit_polar_popup(ctx, g_boat_config.n_polars - 1);  // ouvre directement l'éditeur
+}
+
+// (Re)construit la liste des polaires dans le dialogue Bateau : une ligne par polaire
+// (résumé + Éditer… + suppression).
+static void rebuild_polars_box(BoatDlgCtx *ctx) {
+    GList *kids = gtk_container_get_children(GTK_CONTAINER(ctx->polars_box));
+    for (GList *l = kids; l; l = l->next) gtk_widget_destroy(GTK_WIDGET(l->data));
+    g_list_free(kids);
+
+    for (int i = 0; i < g_boat_config.n_polars; i++) {
+        PolarDef *pd = &g_boat_config.polars[i];
+        GtkWidget *row = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 6);
+        char sum[160];
+        snprintf(sum, sizeof(sum), "%s   (GV:%d  av:%d  mer:%d)",
+                 pd->name[0] ? pd->name : "(sans nom)", pd->n_mains, pd->n_heads, pd->n_seas);
+        GtkWidget *lbl = gtk_label_new(sum);
+        gtk_label_set_xalign(GTK_LABEL(lbl), 0.0);
+        gtk_box_pack_start(GTK_BOX(row), lbl, TRUE, TRUE, 0);
+
+        GtkWidget *eb = gtk_button_new_with_label(TR(ctx->app, "Éditer…", "Edit…"));
+        g_object_set_data(G_OBJECT(eb), "idx", GINT_TO_POINTER(i));
+        g_signal_connect(eb, "clicked", G_CALLBACK(on_polar_edit_clicked), ctx);
+        gtk_box_pack_start(GTK_BOX(row), eb, FALSE, FALSE, 0);
+
+        GtkWidget *db = gtk_button_new_with_label("✖");
+        g_object_set_data(G_OBJECT(db), "idx", GINT_TO_POINTER(i));
+        g_signal_connect(db, "clicked", G_CALLBACK(on_polar_del_clicked), ctx);
+        gtk_box_pack_start(GTK_BOX(row), db, FALSE, FALSE, 0);
+
+        gtk_box_pack_start(GTK_BOX(ctx->polars_box), row, FALSE, FALSE, 0);
+    }
+    gtk_widget_show_all(ctx->polars_box);
+}
+
 void on_boat_config_clicked(GtkWidget *widget, gpointer user_data) {
     (void)widget;
     AppWidgets *app = (AppWidgets *)user_data;
@@ -1359,7 +1510,7 @@ void on_boat_config_clicked(GtkWidget *widget, gpointer user_data) {
         TR(app, "Enregistrer…", "Save…"), 2,
         TR(app, "Fermer", "Close"), GTK_RESPONSE_CLOSE,
         NULL);
-    gtk_window_set_default_size(GTK_WINDOW(dialog), 660, 470);
+    gtk_window_set_default_size(GTK_WINDOW(dialog), 680, 620);
     GtkWidget *content = gtk_dialog_get_content_area(GTK_DIALOG(dialog));
     gtk_box_set_spacing(GTK_BOX(content), 6);
 
@@ -1402,7 +1553,27 @@ void on_boat_config_clicked(GtkWidget *widget, gpointer user_data) {
     boat_textview_set(GTK_TEXT_VIEW(tv_head), g_boat_config.headsail, g_boat_config.n_headsail);
     boat_textview_set(GTK_TEXT_VIEW(tv_sea),  g_boat_config.seastate, g_boat_config.n_seastate);
 
+    // Section Polaires : liste éditable des polaires du bateau (+ « Ajouter »).
+    GtkWidget *pol_frame = gtk_frame_new(TR(app, "Polaires du bateau", "Boat polars"));
+    GtkWidget *pol_vbox = gtk_box_new(GTK_ORIENTATION_VERTICAL, 4);
+    GtkWidget *polars_box = gtk_box_new(GTK_ORIENTATION_VERTICAL, 2);
+    GtkWidget *psw = gtk_scrolled_window_new(NULL, NULL);
+    gtk_scrolled_window_set_policy(GTK_SCROLLED_WINDOW(psw), GTK_POLICY_NEVER, GTK_POLICY_AUTOMATIC);
+    gtk_widget_set_size_request(psw, -1, 120);
+    gtk_container_add(GTK_CONTAINER(psw), polars_box);
+    gtk_box_pack_start(GTK_BOX(pol_vbox), psw, TRUE, TRUE, 0);
+    GtkWidget *add_btn = gtk_button_new_with_label(TR(app, "➕ Ajouter une polaire", "➕ Add a polar"));
+    gtk_widget_set_halign(add_btn, GTK_ALIGN_START);
+    gtk_box_pack_start(GTK_BOX(pol_vbox), add_btn, FALSE, FALSE, 0);
+    gtk_container_add(GTK_CONTAINER(pol_frame), pol_vbox);
+    gtk_box_pack_start(GTK_BOX(content), pol_frame, TRUE, TRUE, 0);
+
+    BoatDlgCtx ctx = { dialog, polars_box, GTK_TEXT_VIEW(tv_main),
+                       GTK_TEXT_VIEW(tv_head), GTK_TEXT_VIEW(tv_sea), app };
+    g_signal_connect(add_btn, "clicked", G_CALLBACK(on_polar_add_clicked), &ctx);
+
     gtk_widget_show_all(dialog);
+    rebuild_polars_box(&ctx);
 
     int resp;
     while ((resp = gtk_dialog_run(GTK_DIALOG(dialog))) == 1 || resp == 2) {
@@ -1431,6 +1602,7 @@ void on_boat_config_clicked(GtkWidget *widget, gpointer user_data) {
                 boat_textview_set(GTK_TEXT_VIEW(tv_main), g_boat_config.mainsail, g_boat_config.n_mainsail);
                 boat_textview_set(GTK_TEXT_VIEW(tv_head), g_boat_config.headsail, g_boat_config.n_headsail);
                 boat_textview_set(GTK_TEXT_VIEW(tv_sea),  g_boat_config.seastate, g_boat_config.n_seastate);
+                rebuild_polars_box(&ctx);
             }
             g_free(path);
         }
