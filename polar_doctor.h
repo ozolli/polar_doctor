@@ -93,6 +93,7 @@ typedef struct {
 } BoatConfig;
 
 extern BoatConfig g_boat_config;
+extern char g_boat_config_path[];   // chemin du config du bateau ouvert ("" si aucun)
 
 // Données NMEA en cours d'assemblage (paire MWV+VHW, + SOG le plus récent).
 typedef struct {

@@ -729,8 +729,10 @@ void open_boat(AppWidgets *app, const char *folder) {
     if (!prompt_save_changes(app)) return;
 
     char cfg[BOAT_PATH_LEN];
-    if (boat_find_config(folder, cfg, sizeof(cfg)))
+    if (boat_find_config(folder, cfg, sizeof(cfg))) {
         boat_config_load(&g_boat_config, cfg);
+        g_strlcpy(g_boat_config_path, cfg, BOAT_PATH_LEN);  // pour pré-sélection à l'enregistrement
+    }
 
     // Charger la première polaire .pol du dossier (1 polaire/bateau pour l'instant)
     char polpath[BOAT_PATH_LEN] = "";
@@ -832,6 +834,7 @@ void on_new_boat_clicked(GtkWidget *widget, gpointer user_data) {
             char *named = g_strdup_printf("%s.cfg", base);          // config nommé d'après le bateau
             char *cfgpath = g_build_filename(folder, named, NULL);
             boat_config_save(&g_boat_config, cfgpath);
+            g_strlcpy(g_boat_config_path, cfgpath, BOAT_PATH_LEN);
             char *polname = g_strdup_printf("%s.pol", base);        // polaire vide
             char *polpath = g_build_filename(folder, polname, NULL);
             init_polar_data(app->polar_data);
@@ -1589,13 +1592,23 @@ void on_boat_config_clicked(GtkWidget *widget, gpointer user_data) {
             TR(app, "_Annuler", "_Cancel"), GTK_RESPONSE_CANCEL,
             (resp == 2) ? TR(app, "_Enregistrer", "_Save") : TR(app, "_Ouvrir", "_Open"),
             GTK_RESPONSE_ACCEPT, NULL);
-        if (resp == 2)
-            gtk_file_chooser_set_current_name(GTK_FILE_CHOOSER(fc), "boat.cfg");
+        if (resp == 2) {  // Enregistrer : pré-sélectionne le config du bateau ouvert
+            if (g_boat_config_path[0])
+                gtk_file_chooser_set_filename(GTK_FILE_CHOOSER(fc), g_boat_config_path);
+            else
+                gtk_file_chooser_set_current_name(GTK_FILE_CHOOSER(fc), "boat.cfg");
+        } else if (g_boat_config_path[0]) {  // Charger : se place dans le dossier du bateau
+            char *dir = g_path_get_dirname(g_boat_config_path);
+            gtk_file_chooser_set_current_folder(GTK_FILE_CHOOSER(fc), dir);
+            g_free(dir);
+        }
         if (gtk_dialog_run(GTK_DIALOG(fc)) == GTK_RESPONSE_ACCEPT) {
             char *path = gtk_file_chooser_get_filename(GTK_FILE_CHOOSER(fc));
             if (path && resp == 2) {
                 boat_config_save(&g_boat_config, path);
+                g_strlcpy(g_boat_config_path, path, BOAT_PATH_LEN);
             } else if (path && boat_config_load(&g_boat_config, path)) {
+                g_strlcpy(g_boat_config_path, path, BOAT_PATH_LEN);
                 gtk_entry_set_text(GTK_ENTRY(name_entry), g_boat_config.name);
                 gtk_entry_set_text(GTK_ENTRY(mot_entry), g_boat_config.kw_moteur);
                 gtk_entry_set_text(GTK_ENTRY(chg_entry), g_boat_config.kw_charge);
