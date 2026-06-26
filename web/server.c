@@ -29,7 +29,7 @@
 #include <netinet/in.h>
 #include <arpa/inet.h>
 
-#define REQ_MAX   16384
+#define REQ_MAX   131072   /* en-têtes + corps POST (.pol édité) */
 #define JSON_MAX  262144   /* polaire en JSON (worst case ~110 Ko) */
 
 static PolarData    g_polar;
@@ -76,11 +76,18 @@ static const char PAGE[] =
 ".lg{font-size:.85em}.lg div{display:flex;align-items:center;gap:.5em;margin:.15em 0}\n"
 ".sw{width:14px;height:14px;border-radius:3px;flex:0 0 auto}\n"
 "small{color:var(--muted)}\n"
+"header nav{display:flex;gap:.3em;margin-left:1em}\n"
+"header nav button{background:var(--btn);color:var(--fg);border:1px solid var(--border);padding:.25em .7em;border-radius:6px;cursor:pointer}\n"
+"header nav button.on{background:var(--active);color:#fff;border-color:var(--active)}\n"
+".dt{border-collapse:collapse;font-size:.85em}.dt th,.dt td{border:1px solid var(--border);padding:2px 5px;text-align:center}\n"
+".dt input.dc{width:4.4em;background:var(--inbg);color:var(--fg);border:1px solid var(--border);border-radius:3px;text-align:right;font-variant-numeric:tabular-nums}\n"
+".delx{background:none;border:0;color:var(--muted);cursor:pointer;font-size:.75em;padding:0}\n"
 "</style></head><body>\n"
 "<header><b>Polar Doctor</b><small id='fn'></small>\n"
+"<nav><button data-v='diag' class='on' data-i18n='tabdiag'>Diagramme</button><button data-v='data' data-i18n='tabdata'>Données</button></nav>\n"
 "<span style='margin-left:auto;display:flex;gap:.5em'>"
 "<button id='lang' class='hbtn'></button><button id='theme' class='hbtn'></button></span></header>\n"
-"<main>\n"
+"<main id='mdiag'>\n"
 "<div id='wrap'><canvas id='cv'></canvas></div>\n"
 "<aside>\n"
 "<div class='card'><h3 data-i18n='boat'>Bateau</h3>\n"
@@ -105,11 +112,17 @@ static const char PAGE[] =
 "<div class='card'><h3 data-i18n='legend'>Légende (TWS)</h3><div id='leg' class='lg'></div></div>\n"
 "<div class='card'><small id='info'></small></div>\n"
 "</aside></main>\n"
+"<div id='mdata' style='display:none;padding:1em'>\n"
+"<div style='margin-bottom:.6em'><button class='hbtn' id='btnSave' data-i18n='save1'>Enregistrer</button> "
+"<button class='hbtn' id='btnAddTwa' data-i18n='addtwa'>+ TWA</button> "
+"<button class='hbtn' id='btnAddTws' data-i18n='addtws'>+ TWS</button> "
+"<span id='dmsg' style='font-size:.85em;color:var(--muted)'></span></div>\n"
+"<div id='dtable' style='overflow:auto'></div></div>\n"
 "<script>\n"
 "let lang=localStorage.getItem('lang')||((navigator.language||'fr').toLowerCase().startsWith('fr')?'fr':'en');\n"
 "let theme=localStorage.getItem('theme')||((window.matchMedia&&matchMedia('(prefers-color-scheme: light)').matches)?'light':'dark');\n"
-"const L={fr:{boat:'Bateau',range:'Plage TWS',from:'De',to:'à',legend:'Légende (TWS)',kn:'nœuds',empty:'Aucune polaire chargée.',max:'Vitesse max',dyn:'Mode dynamique',dyn_on:'Activer',tws1:'TWS',live:'Live',source:'Source',start:'Démarrer',stop:'Arrêter',moteur:'Moteur',main1:'GV',head1:'Voile av.',sea1:'Mer'},\n"
-"en:{boat:'Boat',range:'TWS range',from:'From',to:'to',legend:'Legend (TWS)',kn:'knots',empty:'No polar loaded.',max:'Max speed',dyn:'Dynamic mode',dyn_on:'Enable',tws1:'TWS',live:'Live',source:'Source',start:'Start',stop:'Stop',moteur:'Engine',main1:'Main',head1:'Headsail',sea1:'Sea'}};\n"
+"const L={fr:{boat:'Bateau',range:'Plage TWS',from:'De',to:'à',legend:'Légende (TWS)',kn:'nœuds',empty:'Aucune polaire chargée.',max:'Vitesse max',dyn:'Mode dynamique',dyn_on:'Activer',tws1:'TWS',live:'Live',source:'Source',start:'Démarrer',stop:'Arrêter',moteur:'Moteur',main1:'GV',head1:'Voile av.',sea1:'Mer',tabdiag:'Diagramme',tabdata:'Données',save1:'Enregistrer',addtwa:'+ TWA',addtws:'+ TWS'},\n"
+"en:{boat:'Boat',range:'TWS range',from:'From',to:'to',legend:'Legend (TWS)',kn:'knots',empty:'No polar loaded.',max:'Max speed',dyn:'Dynamic mode',dyn_on:'Enable',tws1:'TWS',live:'Live',source:'Source',start:'Start',stop:'Stop',moteur:'Engine',main1:'Main',head1:'Headsail',sea1:'Sea',tabdiag:'Diagram',tabdata:'Data',save1:'Save',addtwa:'+ TWA',addtws:'+ TWS'}};\n"
 "const T=k=>(L[lang]&&L[lang][k]!=null)?L[lang][k]:k;\n"
 "function i18n(){document.querySelectorAll('[data-i18n]').forEach(e=>e.textContent=T(e.dataset.i18n));document.documentElement.lang=lang;}\n"
 "const $=s=>document.querySelector(s);\n"
@@ -191,6 +204,21 @@ static const char PAGE[] =
 "$('#lvsrc').onchange=()=>{$('#lvaddr').value=$('#lvsrc').value==='vdr'?'/home/ozolli/.qtVlm/vdrs/vdr.db':'10110';};\n"
 "function sendState(){fetch('/api/live/state?main='+encodeURIComponent($('#lvmain').value)+'&head='+encodeURIComponent($('#lvhead').value)+'&sea='+encodeURIComponent($('#lvsea').value)).then(()=>pollLive());}\n"
 "$('#lvmain').onchange=sendState;$('#lvhead').onchange=sendState;$('#lvsea').onchange=sendState;\n"
+"function renderTable(){if(!P||!P.twa){$('#dtable').innerHTML='';return;}\n"
+" let h='<table class=dt><tr><th></th>';\n"
+" P.tws.forEach((t,k)=>h+='<th>'+t+'<br><button class=delx data-c='+k+'>✕</button></th>');h+='</tr>';\n"
+" P.twa.forEach((a,ai)=>{h+='<tr><th>'+a+'°<br><button class=delx data-r='+ai+'>✕</button></th>';\n"
+"  P.tws.forEach((t,k)=>{const v=(P.bsp[ai]&&P.bsp[ai][k]!=null)?+P.bsp[ai][k]:0;h+='<td><input class=dc data-r='+ai+' data-c='+k+' value=\"'+v.toFixed(2)+'\"></td>';});h+='</tr>';});\n"
+" $('#dtable').innerHTML=h+'</table>';}\n"
+"$('#dtable').addEventListener('input',e=>{if(!e.target.classList.contains('dc'))return;P.bsp[+e.target.dataset.r][+e.target.dataset.c]=parseFloat(e.target.value)||0;});\n"
+"$('#dtable').addEventListener('click',e=>{const t=e.target;if(!t.classList.contains('delx'))return;\n"
+" if(t.dataset.c!==undefined){const c=+t.dataset.c;P.tws.splice(c,1);P.bsp.forEach(r=>r.splice(c,1));}\n"
+" else if(t.dataset.r!==undefined){const r=+t.dataset.r;P.twa.splice(r,1);P.bsp.splice(r,1);}renderTable();});\n"
+"$('#btnAddTwa').onclick=()=>{const v=parseInt(prompt('TWA (0-180)'),10);if(isNaN(v)||v<0||v>180||P.twa.includes(v))return;let i=0;while(i<P.twa.length&&P.twa[i]<v)i++;P.twa.splice(i,0,v);P.bsp.splice(i,0,P.tws.map(()=>0));renderTable();};\n"
+"$('#btnAddTws').onclick=()=>{const v=parseInt(prompt('TWS (kn)'),10);if(isNaN(v)||v<=0||P.tws.includes(v))return;let i=0;while(i<P.tws.length&&P.tws[i]<v)i++;P.tws.splice(i,0,v);P.bsp.forEach(r=>r.splice(i,0,0));renderTable();};\n"
+"function buildPol(){let s='TWA\\\\TWS;0;'+P.tws.join(';')+'\\n';P.twa.forEach((a,ai)=>{s+=a+';0.00';P.tws.forEach((t,k)=>{s+=';'+((P.bsp[ai]&&P.bsp[ai][k]!=null)?+P.bsp[ai][k]:0).toFixed(2);});s+='\\n';});return s;}\n"
+"$('#btnSave').onclick=async()=>{const r=await fetch('/api/save',{method:'POST',body:buildPol()});const d=await r.json().catch(()=>({}));if(d.ok){await load();renderTable();$('#dmsg').textContent='✓';}else $('#dmsg').textContent='✗';};\n"
+"document.querySelectorAll('header nav button').forEach(b=>b.onclick=()=>{const v=b.dataset.v;$('#mdiag').style.display=v==='diag'?'':'none';$('#mdata').style.display=v==='data'?'':'none';document.querySelectorAll('header nav button').forEach(x=>x.classList.toggle('on',x===b));if(v==='data')renderTable();});\n"
 "function applyTheme(){document.body.classList.toggle('light',theme==='light');$('#theme').textContent=theme==='dark'?'☀':'🌙';}\n"
 "$('#lang').onclick=()=>{lang=lang==='fr'?'en':'fr';localStorage.setItem('lang',lang);$('#lang').textContent=lang==='fr'?'EN':'FR';i18n();load();};\n"
 "$('#theme').onclick=()=>{theme=theme==='dark'?'light':'dark';localStorage.setItem('theme',theme);applyTheme();draw();};\n"
@@ -737,6 +765,32 @@ static void serve_live(int fd)
     send_text(fd, 200, "OK", "application/json", buf);
 }
 
+/* POST /api/save : corps = texte .pol (édité côté navigateur). Écrit dans un .tmp,
+ * valide en le rechargeant, puis remplace la polaire courante atomiquement. */
+static void serve_save(int fd, char *body)
+{
+    if (g_npol <= 0 || g_cur < 0 || g_cur >= g_npol) { send_text(fd, 400, "Bad Request", "application/json", "{\"ok\":false}"); return; }
+    char tmp[700]; snprintf(tmp, sizeof tmp, "%s.tmp", g_pol_paths[g_cur]);
+    int fdw = open(tmp, O_WRONLY | O_CREAT | O_TRUNC, 0644);
+    if (fdw < 0) { send_text(fd, 500, "Error", "application/json", "{\"ok\":false}"); return; }
+    size_t len = strlen(body), w = 0;
+    while (w < len) { ssize_t x = write(fdw, body + w, len - w); if (x <= 0) break; w += (size_t)x; }
+    close(fdw);
+    PolarData test; init_polar_data(&test);
+    /* load_polar_file est laxiste : on exige une polaire non dégénérée (>=1 TWA,
+     * >=2 colonnes TWS dont la sentinelle 0) avant de remplacer le fichier. */
+    if (load_polar_file(tmp, &test) && test.num_angles >= 1 && test.num_speeds >= 2
+        && rename(tmp, g_pol_paths[g_cur]) == 0) {
+        g_polar = test;
+        snprintf(g_polar.filename, sizeof g_polar.filename, "%s", g_pol_paths[g_cur]);
+        g_loaded = 1;
+        send_text(fd, 200, "OK", "application/json", "{\"ok\":true}");
+    } else {
+        unlink(tmp);
+        send_text(fd, 400, "Bad Request", "application/json", "{\"ok\":false}");
+    }
+}
+
 /* --------------------------------------------------------------- client --- */
 static void handle_client(int fd)
 {
@@ -756,6 +810,30 @@ static void handle_client(int fd)
 
     if (!authed(req)) { send_401(fd); return; }
 
+    /* Corps (POST) : complète la lecture selon Content-Length. */
+    char *hdr_end = strstr(req, "\r\n\r\n");
+    char *body = hdr_end ? hdr_end + 4 : NULL;
+    if (body) {
+        const char *cl = strcasestr(req, "Content-Length:");
+        if (cl) {
+            size_t want = (size_t)strtoul(cl + 15, NULL, 10);
+            size_t have = n - (size_t)(body - req);
+            while (have < want && n < sizeof req - 1) {
+                r = recv(fd, req + n, sizeof req - 1 - n, 0);
+                if (r <= 0) break;
+                n += (size_t)r; have += (size_t)r;
+            }
+            req[n] = '\0';
+            body = strstr(req, "\r\n\r\n") + 4;
+            body[want < have ? want : have] = '\0';
+        }
+    }
+
+    if (strcmp(method, "POST") == 0) {
+        if (strcmp(path, "/api/save") == 0 && body) serve_save(fd, body);
+        else send_text(fd, 404, "Not Found", "text/plain", "404\n");
+        return;
+    }
     if (strcmp(method, "GET") != 0) { send_text(fd, 400, "Bad Request", "text/plain", "400\n"); return; }
 
     if (strcmp(path, "/") == 0)
