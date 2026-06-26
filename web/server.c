@@ -258,7 +258,7 @@ static void handle_client(int fd)
 
 int main(int argc, char **argv)
 {
-    int port = 8080;
+    int port = 8081;   /* 8080 est pris par n2k-mux-web */
     const char *bind_addr = "127.0.0.1";
     const char *pol = NULL;
 
@@ -269,7 +269,7 @@ int main(int argc, char **argv)
         else if (strcmp(argv[i], "-h") == 0 || strcmp(argv[i], "--help") == 0) {
             fprintf(stderr,
                 "Usage : %s [fichier.pol] [--port N] [--bind ADDR] [--auth user:pass]\n"
-                "  --port N     port d'écoute (défaut 8080)\n"
+                "  --port N     port d'écoute (défaut 8081 ; 8080 = n2k-mux-web)\n"
                 "  --bind ADDR  adresse d'écoute (défaut 127.0.0.1 ; 0.0.0.0 = LAN)\n"
                 "  --auth u:p   authentification HTTP Basic\n", argv[0]);
             return 0;
