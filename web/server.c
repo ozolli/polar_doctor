@@ -117,12 +117,16 @@ static const char PAGE[] =
 "<button class='hbtn' id='btnAddTwa' data-i18n='addtwa'>+ TWA</button> "
 "<button class='hbtn' id='btnAddTws' data-i18n='addtws'>+ TWS</button> "
 "<span id='dmsg' style='font-size:.85em;color:var(--muted)'></span></div>\n"
+"<div style='margin:.2em 0 .8em;padding:.5em;border:1px solid var(--border);border-radius:6px'>\n"
+"<b data-i18n='import'>Import fichiers</b><br>\n"
+"<textarea id='imppaths' rows='2' placeholder='/chemin/nav.nmea (un par ligne)' style='width:100%;background:var(--inbg);color:var(--fg);border:1px solid var(--border);border-radius:4px'></textarea>\n"
+"<button class='hbtn' id='btnCreate' data-i18n='create1'>Créer</button> <button class='hbtn' id='btnUpdate' data-i18n='update1'>Mettre à jour</button> <span id='impmsg' style='font-size:.85em;color:var(--muted)'></span></div>\n"
 "<div id='dtable' style='overflow:auto'></div></div>\n"
 "<script>\n"
 "let lang=localStorage.getItem('lang')||((navigator.language||'fr').toLowerCase().startsWith('fr')?'fr':'en');\n"
 "let theme=localStorage.getItem('theme')||((window.matchMedia&&matchMedia('(prefers-color-scheme: light)').matches)?'light':'dark');\n"
-"const L={fr:{boat:'Bateau',range:'Plage TWS',from:'De',to:'à',legend:'Légende (TWS)',kn:'nœuds',empty:'Aucune polaire chargée.',max:'Vitesse max',dyn:'Mode dynamique',dyn_on:'Activer',tws1:'TWS',live:'Live',source:'Source',start:'Démarrer',stop:'Arrêter',moteur:'Moteur',main1:'GV',head1:'Voile av.',sea1:'Mer',tabdiag:'Diagramme',tabdata:'Données',save1:'Enregistrer',addtwa:'+ TWA',addtws:'+ TWS'},\n"
-"en:{boat:'Boat',range:'TWS range',from:'From',to:'to',legend:'Legend (TWS)',kn:'knots',empty:'No polar loaded.',max:'Max speed',dyn:'Dynamic mode',dyn_on:'Enable',tws1:'TWS',live:'Live',source:'Source',start:'Start',stop:'Stop',moteur:'Engine',main1:'Main',head1:'Headsail',sea1:'Sea',tabdiag:'Diagram',tabdata:'Data',save1:'Save',addtwa:'+ TWA',addtws:'+ TWS'}};\n"
+"const L={fr:{boat:'Bateau',range:'Plage TWS',from:'De',to:'à',legend:'Légende (TWS)',kn:'nœuds',empty:'Aucune polaire chargée.',max:'Vitesse max',dyn:'Mode dynamique',dyn_on:'Activer',tws1:'TWS',live:'Live',source:'Source',start:'Démarrer',stop:'Arrêter',moteur:'Moteur',main1:'GV',head1:'Voile av.',sea1:'Mer',tabdiag:'Diagramme',tabdata:'Données',save1:'Enregistrer',addtwa:'+ TWA',addtws:'+ TWS',import:'Import fichiers',create1:'Créer',update1:'Mettre à jour'},\n"
+"en:{boat:'Boat',range:'TWS range',from:'From',to:'to',legend:'Legend (TWS)',kn:'knots',empty:'No polar loaded.',max:'Max speed',dyn:'Dynamic mode',dyn_on:'Enable',tws1:'TWS',live:'Live',source:'Source',start:'Start',stop:'Stop',moteur:'Engine',main1:'Main',head1:'Headsail',sea1:'Sea',tabdiag:'Diagram',tabdata:'Data',save1:'Save',addtwa:'+ TWA',addtws:'+ TWS',import:'Import files',create1:'Create',update1:'Update'}};\n"
 "const T=k=>(L[lang]&&L[lang][k]!=null)?L[lang][k]:k;\n"
 "function i18n(){document.querySelectorAll('[data-i18n]').forEach(e=>e.textContent=T(e.dataset.i18n));document.documentElement.lang=lang;}\n"
 "const $=s=>document.querySelector(s);\n"
@@ -218,6 +222,10 @@ static const char PAGE[] =
 "$('#btnAddTws').onclick=()=>{const v=parseInt(prompt('TWS (kn)'),10);if(isNaN(v)||v<=0||P.tws.includes(v))return;let i=0;while(i<P.tws.length&&P.tws[i]<v)i++;P.tws.splice(i,0,v);P.bsp.forEach(r=>r.splice(i,0,0));renderTable();};\n"
 "function buildPol(){let s='TWA\\\\TWS;0;'+P.tws.join(';')+'\\n';P.twa.forEach((a,ai)=>{s+=a+';0.00';P.tws.forEach((t,k)=>{s+=';'+((P.bsp[ai]&&P.bsp[ai][k]!=null)?+P.bsp[ai][k]:0).toFixed(2);});s+='\\n';});return s;}\n"
 "$('#btnSave').onclick=async()=>{const r=await fetch('/api/save',{method:'POST',body:buildPol()});const d=await r.json().catch(()=>({}));if(d.ok){await load();renderTable();$('#dmsg').textContent='✓';}else $('#dmsg').textContent='✗';};\n"
+"async function doImport(upd){const paths=$('#imppaths').value.trim();if(!paths)return;$('#impmsg').textContent='…';\n"
+" const r=await fetch('/api/import?mode='+(upd?'update':'create'),{method:'POST',body:paths});const d=await r.json().catch(()=>({}));\n"
+" if(d.ok){$('#impmsg').textContent='✓ '+d.files+' fich., '+d.points+' pts → '+(d.saved.split('/').pop());await loadBoat();await load();renderTable();}else $('#impmsg').textContent='✗';}\n"
+"$('#btnCreate').onclick=()=>doImport(false);$('#btnUpdate').onclick=()=>doImport(true);\n"
 "document.querySelectorAll('header nav button').forEach(b=>b.onclick=()=>{const v=b.dataset.v;$('#mdiag').style.display=v==='diag'?'':'none';$('#mdata').style.display=v==='data'?'':'none';document.querySelectorAll('header nav button').forEach(x=>x.classList.toggle('on',x===b));if(v==='data')renderTable();});\n"
 "function applyTheme(){document.body.classList.toggle('light',theme==='light');$('#theme').textContent=theme==='dark'?'☀':'🌙';}\n"
 "$('#lang').onclick=()=>{lang=lang==='fr'?'en':'fr';localStorage.setItem('lang',lang);$('#lang').textContent=lang==='fr'?'EN':'FR';i18n();load();};\n"
@@ -791,6 +799,56 @@ static void serve_save(int fd, char *body)
     }
 }
 
+/* POST /api/import?mode=create|update : corps = chemins de fichiers NMEA/VDR
+ * (un par ligne, locaux au serveur). create → nouvelle polaire import_<ts>.pol ;
+ * update → réagrège l'existant (sélectionné) + les fichiers, écrit sur place. */
+static void serve_import(int fd, char *body, int update)
+{
+    polar_grid_t g; init_polar_grid(&g);
+    if (update && g_npol > 0 && g_cur >= 0 && g_cur < g_npol)
+        load_existing_polar_for_update(g_pol_paths[g_cur], &g, NULL);
+
+    int total = 0, files = 0;
+    char *sp = NULL;
+    for (char *line = strtok_r(body, "\r\n", &sp); line; line = strtok_r(NULL, "\r\n", &sp)) {
+        char *p = line; while (*p == ' ' || *p == '\t') p++;
+        if (!*p) continue;
+        int c = process_file(p, &g, NULL);
+        if (c >= 0) { total += c; files++; }
+    }
+
+    static double res[PG_MAX_ANGLES][PG_MAX_SPEEDS];
+    static PolarData lp;
+    compute_polar(&g, res, NULL);
+    load_polar_from_grid(&lp, &g, res);
+
+    char path[700];
+    if (update && g_npol > 0 && g_cur >= 0 && g_cur < g_npol) {
+        snprintf(path, sizeof path, "%s", g_pol_paths[g_cur]);
+    } else {
+        char dir[512] = ".";
+        if (g_boat_dir[0]) snprintf(dir, sizeof dir, "%s", g_boat_dir);
+        else if (g_npol > 0) { snprintf(dir, sizeof dir, "%s", g_pol_paths[0]); char *s = strrchr(dir, '/'); if (s) *s = 0; else snprintf(dir, sizeof dir, "."); }
+        time_t t = time(NULL); struct tm tmv; localtime_r(&t, &tmv);
+        char ts[32]; strftime(ts, sizeof ts, "%Y%m%d_%H%M%S", &tmv);
+        snprintf(path, sizeof path, "%s/import_%s.pol", dir, ts);
+    }
+
+    int ok = (lp.num_angles >= 1 && lp.num_speeds >= 2 && save_polar_file(path, &lp));
+    if (ok) {
+        PolarData t; init_polar_data(&t);
+        if (load_polar_file(path, &t)) { g_polar = t; snprintf(g_polar.filename, sizeof g_polar.filename, "%s", path); g_loaded = 1; }
+        rescan_boat();
+        for (int i = 0; i < g_npol; i++) if (strcmp(g_pol_paths[i], path) == 0) { g_cur = i; break; }
+    }
+    free_polar_grid(&g);
+
+    char e[700], out[900]; json_escape(ok ? path : "", e, sizeof e);
+    snprintf(out, sizeof out, "{\"ok\":%s,\"files\":%d,\"points\":%d,\"saved\":\"%s\"}",
+             ok ? "true" : "false", files, total, e);
+    send_text(fd, ok ? 200 : 400, ok ? "OK" : "Bad Request", "application/json", out);
+}
+
 /* --------------------------------------------------------------- client --- */
 static void handle_client(int fd)
 {
@@ -831,6 +889,8 @@ static void handle_client(int fd)
 
     if (strcmp(method, "POST") == 0) {
         if (strcmp(path, "/api/save") == 0 && body) serve_save(fd, body);
+        else if (strncmp(path, "/api/import", 11) == 0 && body)
+            serve_import(fd, body, strstr(path, "update") != NULL);
         else send_text(fd, 404, "Not Found", "text/plain", "404\n");
         return;
     }
