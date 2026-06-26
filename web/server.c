@@ -19,6 +19,9 @@
 #include <unistd.h>
 #include <signal.h>
 #include <fcntl.h>
+#include <dirent.h>
+#include <strings.h>
+#include <sys/stat.h>
 #include <sys/socket.h>
 #include <netinet/in.h>
 #include <arpa/inet.h>
@@ -30,6 +33,14 @@ static PolarData    g_polar;
 static int          g_loaded = 0;
 static const char  *g_auth = NULL;     /* "user:pass" attendu (NULL = pas d'auth) */
 static char         g_auth_b64[352];
+
+/* Bateau = dossier de .pol (liste POSIX ; le boat.cfg viendra avec libpolar). */
+#define MAXPOL 64
+static char g_boat_name[128] = "";
+static char g_pol_paths[MAXPOL][512];
+static char g_pol_names[MAXPOL][128];
+static int  g_npol = 0;
+static int  g_cur  = 0;
 
 /* ------------------------------------------------------------------ SPA --- */
 static const char PAGE[] =
@@ -61,6 +72,9 @@ static const char PAGE[] =
 "<main>\n"
 "<div id='wrap'><canvas id='cv'></canvas></div>\n"
 "<aside>\n"
+"<div class='card'><h3 data-i18n='boat'>Bateau</h3>\n"
+"<div id='bname' style='font-size:.9em;margin-bottom:.3em'></div>\n"
+"<select id='polsel'></select></div>\n"
 "<div class='card'><h3 data-i18n='range'>Plage TWS</h3>\n"
 "<label><span data-i18n='from'>De</span> <select id='from'></select></label>\n"
 "<label><span data-i18n='to'>à</span> <select id='to'></select></label></div>\n"
@@ -74,8 +88,8 @@ static const char PAGE[] =
 "<script>\n"
 "let lang=localStorage.getItem('lang')||((navigator.language||'fr').toLowerCase().startsWith('fr')?'fr':'en');\n"
 "let theme=localStorage.getItem('theme')||((window.matchMedia&&matchMedia('(prefers-color-scheme: light)').matches)?'light':'dark');\n"
-"const L={fr:{range:'Plage TWS',from:'De',to:'à',legend:'Légende (TWS)',kn:'nœuds',empty:'Aucune polaire chargée.',max:'Vitesse max',dyn:'Mode dynamique',dyn_on:'Activer',tws1:'TWS'},\n"
-"en:{range:'TWS range',from:'From',to:'to',legend:'Legend (TWS)',kn:'knots',empty:'No polar loaded.',max:'Max speed',dyn:'Dynamic mode',dyn_on:'Enable',tws1:'TWS'}};\n"
+"const L={fr:{boat:'Bateau',range:'Plage TWS',from:'De',to:'à',legend:'Légende (TWS)',kn:'nœuds',empty:'Aucune polaire chargée.',max:'Vitesse max',dyn:'Mode dynamique',dyn_on:'Activer',tws1:'TWS'},\n"
+"en:{boat:'Boat',range:'TWS range',from:'From',to:'to',legend:'Legend (TWS)',kn:'knots',empty:'No polar loaded.',max:'Max speed',dyn:'Dynamic mode',dyn_on:'Enable',tws1:'TWS'}};\n"
 "const T=k=>(L[lang]&&L[lang][k]!=null)?L[lang][k]:k;\n"
 "function i18n(){document.querySelectorAll('[data-i18n]').forEach(e=>e.textContent=T(e.dataset.i18n));document.documentElement.lang=lang;}\n"
 "const $=s=>document.querySelector(s);\n"
@@ -100,7 +114,7 @@ static const char PAGE[] =
 " const dyn=$('#dyn').checked&&DYN;\n"
 " let items;if(dyn){items=[{c:DYN,color:'rgb(0,204,0)'}];}else{items=shownIdx().map(s=>({c:P.curves[s],color:col(s),s:s})).filter(o=>o.c);}\n"
 " let mx=0;for(const it of items)for(const q of it.c.pts)mx=Math.max(mx,q[1]);if(mx<=0)mx=1;\n"
-" const ring=Math.max(1,Math.ceil(mx/5));const top=Math.ceil(mx/ring)*ring;\n"
+" const ring=2;const top=Math.max(ring,Math.ceil(mx/ring)*ring);\n"  /* cercles tous les 2 nœuds */
 " const cx=W*0.14,cy=H*0.5,R=Math.min(H*0.46,W*0.82);G={cx:cx,cy:cy,R:R,top:top};\n"
 " const px=(twa,bsp)=>[cx+R*bsp/top*Math.sin(twa*Math.PI/180),cy-R*bsp/top*Math.cos(twa*Math.PI/180)];\n"
 " x.strokeStyle=bd;x.fillStyle=mu;x.font='12px system-ui';x.textAlign='left';\n"
@@ -120,6 +134,11 @@ static const char PAGE[] =
 " $('#fn').textContent=P&&P.filename?(' — '+P.filename):'';\n"
 " if(P&&P.tws.length){opt($('#from'),P.tws,0);opt($('#to'),P.tws,P.tws.length-1);}draw();}\n"
 "$('#from').onchange=draw;$('#to').onchange=draw;addEventListener('resize',draw);\n"
+"async function loadBoat(){try{const b=await fetch('/api/boat').then(r=>r.json());\n"
+" $('#bname').textContent=b.name||'';\n"
+" $('#polsel').innerHTML=(b.polars||[]).map((p,i)=>'<option value='+i+(i===b.current?' selected':'')+'>'+p+'</option>').join('');\n"
+" $('#polsel').style.display=(b.polars&&b.polars.length>1)?'':'none';}catch(e){}}\n"
+"$('#polsel').onchange=async e=>{await fetch('/api/select?i='+e.target.value);await load();if($('#dyn').checked)loadDyn();};\n"
 "async function loadDyn(){const v=parseFloat($('#dtws').value)||0;try{const r=await fetch('/api/curve?tws='+v);DYN=await r.json();}catch(e){DYN=null;}CUR=null;draw();}\n"
 "$('#dyn').onchange=()=>{if($('#dyn').checked)loadDyn();else{DYN=null;CUR=null;draw();}};\n"
 "$('#dtws').onchange=()=>{if($('#dyn').checked)loadDyn();};\n"
@@ -130,7 +149,7 @@ static const char PAGE[] =
 "function applyTheme(){document.body.classList.toggle('light',theme==='light');$('#theme').textContent=theme==='dark'?'☀':'🌙';}\n"
 "$('#lang').onclick=()=>{lang=lang==='fr'?'en':'fr';localStorage.setItem('lang',lang);$('#lang').textContent=lang==='fr'?'EN':'FR';i18n();load();};\n"
 "$('#theme').onclick=()=>{theme=theme==='dark'?'light':'dark';localStorage.setItem('theme',theme);applyTheme();draw();};\n"
-"applyTheme();$('#lang').textContent=lang==='fr'?'EN':'FR';i18n();load();\n"
+"applyTheme();$('#lang').textContent=lang==='fr'?'EN':'FR';i18n();loadBoat();load();\n"
 "</script></body></html>\n";
 
 /*
@@ -281,6 +300,64 @@ static void serve_polar(int fd)
     send_text(fd, 200, "OK", "application/json", buf);
 }
 
+/* --- Bateau : liste des .pol d'un dossier --- */
+static void base_no_ext(const char *path, char *out, size_t cap)
+{
+    const char *b = strrchr(path, '/'); b = b ? b + 1 : path;
+    snprintf(out, cap, "%s", b);
+    char *dot = strrchr(out, '.');
+    if (dot && strcasecmp(dot, ".pol") == 0) *dot = '\0';
+}
+
+static void scan_boat(const char *dir)
+{
+    DIR *d = opendir(dir);
+    if (!d) return;
+    struct dirent *e;
+    while ((e = readdir(d)) && g_npol < MAXPOL) {
+        size_t l = strlen(e->d_name);
+        if (l < 4 || strcasecmp(e->d_name + l - 4, ".pol") != 0) continue;
+        snprintf(g_pol_paths[g_npol], sizeof g_pol_paths[0], "%s/%s", dir, e->d_name);
+        base_no_ext(e->d_name, g_pol_names[g_npol], sizeof g_pol_names[0]);
+        g_npol++;
+    }
+    closedir(d);
+    for (int i = 0; i < g_npol - 1; i++)            /* tri alphabétique */
+        for (int j = i + 1; j < g_npol; j++)
+            if (strcasecmp(g_pol_names[i], g_pol_names[j]) > 0) {
+                char tp[512], tn[128];
+                snprintf(tp, sizeof tp, "%s", g_pol_paths[i]); snprintf(tn, sizeof tn, "%s", g_pol_names[i]);
+                snprintf(g_pol_paths[i], 512, "%s", g_pol_paths[j]); snprintf(g_pol_names[i], 128, "%s", g_pol_names[j]);
+                snprintf(g_pol_paths[j], 512, "%s", tp); snprintf(g_pol_names[j], 128, "%s", tn);
+            }
+}
+
+/* GET /api/boat : nom du bateau + liste des polaires + index courant. */
+static void serve_boat(int fd)
+{
+    static char buf[8192]; size_t n = 0; int w;
+#define APP(...) do { w = snprintf(buf + n, sizeof buf - n, __VA_ARGS__); \
+    if (w < 0 || (size_t)w >= sizeof buf - n) { send_text(fd, 500, "Error", "application/json", "{}"); return; } \
+    n += (size_t)w; } while (0)
+    char e[160]; json_escape(g_boat_name, e, sizeof e);
+    APP("{\"name\":\"%s\",\"current\":%d,\"polars\":[", e, g_cur);
+    for (int i = 0; i < g_npol; i++) { json_escape(g_pol_names[i], e, sizeof e); APP("%s\"%s\"", i ? "," : "", e); }
+    APP("]}");
+#undef APP
+    send_text(fd, 200, "OK", "application/json", buf);
+}
+
+/* GET /api/select?i=N : charge la polaire N comme polaire courante. */
+static void serve_select(int fd, int i)
+{
+    if (i < 0 || i >= g_npol) { send_text(fd, 400, "Bad Request", "application/json", "{\"ok\":false}"); return; }
+    PolarData tmp; init_polar_data(&tmp);
+    if (load_polar_file(g_pol_paths[i], &tmp)) {
+        g_polar = tmp; g_loaded = 1; g_cur = i;
+        send_text(fd, 200, "OK", "application/json", "{\"ok\":true}");
+    } else send_text(fd, 500, "Error", "application/json", "{\"ok\":false}");
+}
+
 /* GET /api/curve?tws=X : une courbe interpolée pour une TWS quelconque (mode dynamique). */
 static void serve_curve(int fd, double tws)
 {
@@ -343,6 +420,12 @@ static void handle_client(int fd)
         const char *q = strstr(path, "tws=");
         serve_curve(fd, q ? atof(q + 4) : 0);
     }
+    else if (strcmp(path, "/api/boat") == 0)
+        serve_boat(fd);
+    else if (strncmp(path, "/api/select", 11) == 0) {
+        const char *q = strstr(path, "i=");
+        serve_select(fd, q ? atoi(q + 2) : -1);
+    }
     else
         send_text(fd, 404, "Not Found", "text/plain", "404\n");
 }
@@ -359,7 +442,7 @@ int main(int argc, char **argv)
         else if (strcmp(argv[i], "--auth") == 0 && i + 1 < argc) g_auth = argv[++i];
         else if (strcmp(argv[i], "-h") == 0 || strcmp(argv[i], "--help") == 0) {
             fprintf(stderr,
-                "Usage : %s [fichier.pol] [--port N] [--bind ADDR] [--auth user:pass]\n"
+                "Usage : %s [fichier.pol | dossier-bateau] [--port N] [--bind ADDR] [--auth user:pass]\n"
                 "  --port N     port d'écoute (défaut 8081 ; 8080 = n2k-mux-web)\n"
                 "  --bind ADDR  adresse d'écoute (défaut 127.0.0.1 ; 0.0.0.0 = LAN)\n"
                 "  --auth u:p   authentification HTTP Basic\n", argv[0]);
@@ -369,9 +452,21 @@ int main(int argc, char **argv)
     }
 
     init_polar_data(&g_polar);
-    if (pol) {
+    struct stat st;
+    if (pol && stat(pol, &st) == 0 && S_ISDIR(st.st_mode)) {
+        /* dossier-bateau : lister les .pol, charger le premier */
+        char dir[512]; snprintf(dir, sizeof dir, "%s", pol);
+        size_t L = strlen(dir); while (L > 1 && dir[L - 1] == '/') dir[--L] = '\0';
+        const char *b = strrchr(dir, '/'); snprintf(g_boat_name, sizeof g_boat_name, "%s", b ? b + 1 : dir);
+        scan_boat(dir);
+        if (g_npol > 0 && load_polar_file(g_pol_paths[0], &g_polar)) { g_loaded = 1; g_cur = 0; }
+        else fprintf(stderr, "polar_doctor_web : aucune polaire chargeable dans %s\n", dir);
+    } else if (pol) {
         if (load_polar_file(pol, &g_polar)) g_loaded = 1;
         else fprintf(stderr, "polar_doctor_web : impossible de charger %s\n", pol);
+        snprintf(g_pol_paths[0], sizeof g_pol_paths[0], "%s", pol);
+        base_no_ext(pol, g_pol_names[0], sizeof g_pol_names[0]);
+        g_npol = 1; g_cur = 0;
     }
 
     if (g_auth) {
