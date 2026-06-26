@@ -85,9 +85,9 @@ static const char PAGE[] =
 "<label><span data-i18n='tws1'>TWS</span> <input type=number id='dtws' value='10' min='0' step='0.5' style='width:5em'> <span data-i18n='kn'>nœuds</span></label>\n"
 "<div id='read' style='font-size:.85em;margin-top:.4em'></div></div>\n"
 "<div class='card'><h3 data-i18n='live'>Live</h3>\n"
-"<label><span data-i18n='source'>Source</span> <select id='lvsrc'><option value='udp'>NMEA UDP</option><option value='tcp'>NMEA TCP</option></select></label>\n"
-"<label><input id='lvaddr' value='10110' style='width:9em' title='UDP: port · TCP: hôte:port'></label>\n"
-"<button class='hbtn' id='lvbtn' data-i18n='start'>Démarrer</button>\n"
+"<label><span data-i18n='source'>Source</span> <select id='lvsrc'><option value='udp'>NMEA UDP</option><option value='tcp'>NMEA TCP</option><option value='vdr'>VDR qtVlm</option></select></label>\n"
+"<label><input id='lvaddr' value='10110' style='width:9em' title='UDP: port · TCP: hôte:port · VDR: chemin .db'></label>\n"
+"<button class='hbtn' id='lvbtn' data-i18n='start'>Démarrer</button> <button class='hbtn' id='lvmot' data-i18n='moteur'>Moteur</button>\n"
 "<div id='lvinfo' style='font-size:.85em;margin-top:.3em'></div></div>\n"
 "<div class='card'><h3 data-i18n='legend'>Légende (TWS)</h3><div id='leg' class='lg'></div></div>\n"
 "<div class='card'><small id='info'></small></div>\n"
@@ -95,8 +95,8 @@ static const char PAGE[] =
 "<script>\n"
 "let lang=localStorage.getItem('lang')||((navigator.language||'fr').toLowerCase().startsWith('fr')?'fr':'en');\n"
 "let theme=localStorage.getItem('theme')||((window.matchMedia&&matchMedia('(prefers-color-scheme: light)').matches)?'light':'dark');\n"
-"const L={fr:{boat:'Bateau',range:'Plage TWS',from:'De',to:'à',legend:'Légende (TWS)',kn:'nœuds',empty:'Aucune polaire chargée.',max:'Vitesse max',dyn:'Mode dynamique',dyn_on:'Activer',tws1:'TWS',live:'Live',source:'Source',start:'Démarrer',stop:'Arrêter'},\n"
-"en:{boat:'Boat',range:'TWS range',from:'From',to:'to',legend:'Legend (TWS)',kn:'knots',empty:'No polar loaded.',max:'Max speed',dyn:'Dynamic mode',dyn_on:'Enable',tws1:'TWS',live:'Live',source:'Source',start:'Start',stop:'Stop'}};\n"
+"const L={fr:{boat:'Bateau',range:'Plage TWS',from:'De',to:'à',legend:'Légende (TWS)',kn:'nœuds',empty:'Aucune polaire chargée.',max:'Vitesse max',dyn:'Mode dynamique',dyn_on:'Activer',tws1:'TWS',live:'Live',source:'Source',start:'Démarrer',stop:'Arrêter',moteur:'Moteur'},\n"
+"en:{boat:'Boat',range:'TWS range',from:'From',to:'to',legend:'Legend (TWS)',kn:'knots',empty:'No polar loaded.',max:'Max speed',dyn:'Dynamic mode',dyn_on:'Enable',tws1:'TWS',live:'Live',source:'Source',start:'Start',stop:'Stop',moteur:'Engine'}};\n"
 "const T=k=>(L[lang]&&L[lang][k]!=null)?L[lang][k]:k;\n"
 "function i18n(){document.querySelectorAll('[data-i18n]').forEach(e=>e.textContent=T(e.dataset.i18n));document.documentElement.lang=lang;}\n"
 "const $=s=>document.querySelector(s);\n"
@@ -119,7 +119,11 @@ static const char PAGE[] =
 " const cs=getComputedStyle(document.body),bd=cs.getPropertyValue('--border'),mu=cs.getPropertyValue('--muted');\n"
 " x.clearRect(0,0,W,H);if(!P||!P.tws.length){x.fillStyle=mu;x.fillText(T('empty'),20,30);return;}\n"
 " const dyn=$('#dyn').checked&&DYN;\n"
-" let items;if(dyn){items=[{c:DYN,color:'rgb(0,204,0)'}];}else{items=shownIdx().map(s=>({c:P.curves[s],color:col(s),s:s})).filter(o=>o.c);}\n"
+" const liveOn=LIVE&&LIVE.on&&LIVE.curves&&LIVE.curves.length;\n"
+" let items;\n"
+" if(dyn)items=[{c:DYN,color:'rgb(0,204,0)',tws:DYN.tws}];\n"
+" else if(liveOn)items=LIVE.curves.map((c,i)=>({c:c,color:col(i),tws:LIVE.tws[i]}));\n"
+" else items=shownIdx().map(s=>({c:P.curves[s],color:col(s),tws:P.tws[s]})).filter(o=>o.c);\n"
 " let mx=0;for(const it of items)for(const q of it.c.pts)mx=Math.max(mx,q[1]);\n"
 " if(LIVE&&LIVE.pts){for(const q of LIVE.pts)mx=Math.max(mx,q[1]);if(LIVE.cur)mx=Math.max(mx,LIVE.cur[1]);}if(mx<=0)mx=1;\n"
 " const ring=2;const top=Math.max(ring,Math.ceil(mx/ring)*ring);\n"  /* cercles tous les 2 nœuds */
@@ -136,8 +140,7 @@ static const char PAGE[] =
 "  const p=px(CUR.twa,bs);x.strokeStyle='#1f6feb';x.lineWidth=1.5;x.beginPath();x.moveTo(cx,cy);x.lineTo(p[0],p[1]);x.stroke();x.fillStyle='#1f6feb';x.beginPath();x.arc(p[0],p[1],3,0,7);x.fill();x.lineWidth=1;\n"
 "  $('#read').innerHTML='TWA <b>'+CUR.twa+'°</b> · AWA '+awa.toFixed(0)+'° · AWS '+aws.toFixed(1)+' · BS <b>'+bs.toFixed(2)+'</b> · VMG '+vmg.toFixed(2);}\n"
 " else if(dyn)$('#read').textContent='';\n"
-" if(dyn)$('#leg').innerHTML='<div><span class=sw style=\"background:rgb(0,204,0)\"></span>'+DYN.tws+' '+T('kn')+'</div>';\n"
-" else $('#leg').innerHTML=items.map(it=>'<div><span class=sw style=\"background:'+it.color+'\"></span>'+P.tws[it.s]+' '+T('kn')+'</div>').join('');\n"
+" $('#leg').innerHTML=items.map(it=>'<div><span class=sw style=\"background:'+it.color+'\"></span>'+it.tws+' '+T('kn')+'</div>').join('');\n"
 " $('#info').textContent=T('max')+' : '+mx.toFixed(2)+' '+T('kn');\n"
 "}\n"
 "async function load(){try{const r=await fetch('/api/polar');P=await r.json();}catch(e){P=null;}\n"
@@ -160,9 +163,13 @@ static const char PAGE[] =
 "function stopPoll(){if(liveTimer){clearInterval(liveTimer);liveTimer=null;}}\n"
 "async function pollLive(){try{LIVE=await fetch('/api/live').then(r=>r.json());}catch(e){LIVE=null;}\n"
 " $('#lvinfo').textContent=LIVE&&LIVE.on?('● live · '+LIVE.count+' pts'+(LIVE.cur?(' · TWA '+Math.round(LIVE.cur[0])+'° · BS '+LIVE.cur[1].toFixed(2)):'')):'';\n"
-" const on=!!(LIVE&&LIVE.on);$('#lvbtn').textContent=on?T('stop'):T('start');$('#lvbtn').dataset.on=on?'1':'';draw();}\n"
+" const on=!!(LIVE&&LIVE.on);$('#lvbtn').textContent=on?T('stop'):T('start');$('#lvbtn').dataset.on=on?'1':'';\n"
+" const mot=!!(LIVE&&LIVE.moteur);$('#lvmot').dataset.on=mot?'1':'';$('#lvmot').style.background=mot?'var(--active)':'';$('#lvmot').style.color=mot?'#fff':'';\n"
+" draw();}\n"
 "$('#lvbtn').onclick=async()=>{if($('#lvbtn').dataset.on==='1'){await fetch('/api/live/stop');stopPoll();await pollLive();}\n"
 " else{await fetch('/api/live/start?src='+$('#lvsrc').value+'&addr='+encodeURIComponent($('#lvaddr').value));startPoll();await pollLive();}};\n"
+"$('#lvmot').onclick=async()=>{const on=$('#lvmot').dataset.on==='1'?0:1;await fetch('/api/live/moteur?on='+on);await pollLive();};\n"
+"$('#lvsrc').onchange=()=>{$('#lvaddr').value=$('#lvsrc').value==='vdr'?'/home/ozolli/.qtVlm/vdrs/vdr.db':'10110';};\n"
 "function applyTheme(){document.body.classList.toggle('light',theme==='light');$('#theme').textContent=theme==='dark'?'☀':'🌙';}\n"
 "$('#lang').onclick=()=>{lang=lang==='fr'?'en':'fr';localStorage.setItem('lang',lang);$('#lang').textContent=lang==='fr'?'EN':'FR';i18n();load();};\n"
 "$('#theme').onclick=()=>{theme=theme==='dark'?'light':'dark';localStorage.setItem('theme',theme);applyTheme();draw();};\n"
@@ -247,11 +254,52 @@ static int authed(const char *req)
 }
 
 /* ----------------------------------------------------------- API /polar --- */
+/* Émet "tws":[...],"curves":[...] de pd (échantillonnage = draw_tws_curve GTK :
+ * rangées présentes + frontières VMG a_up/a_dn interpolées). Partagé /api/polar
+ * et la polaire vivante de /api/live. false = débordement de buffer. */
+static bool append_polar_curves(char *buf, size_t cap, size_t *pn, PolarData *pd)
+{
+    size_t n = *pn; int w;
+#define APPC(...) do { w = snprintf(buf + n, cap - n, __VA_ARGS__); \
+    if (w < 0 || (size_t)w >= cap - n) return false; n += (size_t)w; } while (0)
+    int keep[MAX_SPEEDS], nk = 0;
+    for (int s = 0; s < pd->num_speeds; s++)
+        if (pd->tws_values[s] != 0) keep[nk++] = s;
+    APPC("\"tws\":[");
+    for (int k = 0; k < nk; k++) APPC("%s%d", k ? "," : "", pd->tws_values[keep[k]]);
+    APPC("],\"curves\":[");
+    for (int k = 0; k < nk; k++) {
+        double tws = pd->tws_values[keep[k]], a_up, a_dn;
+        vmg_optimal_angles(pd, tws, &a_up, &a_dn);
+        double angs[MAX_ANGLES + 2]; int m = 0;
+        for (int i = 0; i < pd->num_angles; i++)
+            if (pd->twa_present[i]) angs[m++] = pd->twa_values[i];
+        angs[m++] = a_up; angs[m++] = a_dn;
+        for (int i = 0; i < m - 1; i++)
+            for (int j = i + 1; j < m; j++)
+                if (angs[i] > angs[j]) { double t = angs[i]; angs[i] = angs[j]; angs[j] = t; }
+        APPC("%s{\"tws\":%d,\"a_up\":%.1f,\"a_dn\":%.1f,\"pts\":[",
+             k ? "," : "", pd->tws_values[keep[k]], a_up, a_dn);
+        int np = 0; double lastang = -1;
+        for (int i = 0; i < m; i++) {
+            if (np > 0 && fabs(angs[i] - lastang) < 1e-6) continue;
+            double bsp = interpolate_polar_bsp(pd, angs[i], tws);
+            if (bsp < 0.01) continue;
+            APPC("%s[%.1f,%.2f]", np ? "," : "", angs[i], bsp);
+            lastang = angs[i]; np++;
+        }
+        APPC("]}");
+    }
+    APPC("]");
+#undef APPC
+    *pn = n;
+    return true;
+}
+
 static void serve_polar(int fd)
 {
     if (!g_loaded) { send_text(fd, 200, "OK", "application/json", "{\"filename\":\"\",\"tws\":[],\"twa\":[],\"bsp\":[],\"curves\":[]}"); return; }
 
-    /* indices de colonnes TWS à exposer (on saute la colonne sentinelle TWS 0). */
     int keep[MAX_SPEEDS], nk = 0;
     for (int s = 0; s < g_polar.num_speeds; s++)
         if (g_polar.tws_values[s] != 0) keep[nk++] = s;
@@ -261,12 +309,9 @@ static void serve_polar(int fd)
 #define APP(...) do { w = snprintf(buf + n, sizeof buf - n, __VA_ARGS__); \
     if (w < 0 || (size_t)w >= sizeof buf - n) { send_text(fd, 500, "Error", "application/json", "{}"); return; } \
     n += (size_t)w; } while (0)
-
     char e[300];
     json_escape(g_polar.filename, e, sizeof e);
-    APP("{\"filename\":\"%s\",\"tws\":[", e);
-    for (int k = 0; k < nk; k++) APP("%s%d", k ? "," : "", g_polar.tws_values[keep[k]]);
-    APP("],\"twa\":[");
+    APP("{\"filename\":\"%s\",\"twa\":[", e);
     for (int a = 0; a < g_polar.num_angles; a++) APP("%s%d", a ? "," : "", g_polar.twa_values[a]);
     APP("],\"bsp\":[");
     for (int a = 0; a < g_polar.num_angles; a++) {
@@ -274,35 +319,11 @@ static void serve_polar(int fd)
         for (int k = 0; k < nk; k++) APP("%s%.2f", k ? "," : "", g_polar.polar_data[a][keep[k]]);
         APP("]");
     }
-    /* Courbes échantillonnées comme draw_tws_curve (GTK) : rangées présentes +
-     * points-frontières VMG (a_up, a_dn) interpolés → split couleur exact côté JS. */
-    APP("],\"curves\":[");
-    for (int k = 0; k < nk; k++) {
-        double tws = g_polar.tws_values[keep[k]];
-        double a_up, a_dn;
-        vmg_optimal_angles(&g_polar, tws, &a_up, &a_dn);
-        double angs[MAX_ANGLES + 2]; int m = 0;
-        for (int i = 0; i < g_polar.num_angles; i++)
-            if (g_polar.twa_present[i]) angs[m++] = g_polar.twa_values[i];
-        angs[m++] = a_up; angs[m++] = a_dn;
-        for (int i = 0; i < m - 1; i++)
-            for (int j = i + 1; j < m; j++)
-                if (angs[i] > angs[j]) { double t = angs[i]; angs[i] = angs[j]; angs[j] = t; }
-        APP("%s{\"tws\":%d,\"a_up\":%.1f,\"a_dn\":%.1f,\"pts\":[",
-            k ? "," : "", g_polar.tws_values[keep[k]], a_up, a_dn);
-        int np = 0; double lastang = -1;
-        for (int i = 0; i < m; i++) {
-            if (np > 0 && fabs(angs[i] - lastang) < 1e-6) continue;
-            double bsp = interpolate_polar_bsp(&g_polar, angs[i], tws);
-            if (bsp < 0.01) continue;
-            APP("%s[%.1f,%.2f]", np ? "," : "", angs[i], bsp);
-            lastang = angs[i]; np++;
-        }
-        APP("]}");
-    }
+    APP("],");
+    if (!append_polar_curves(buf, sizeof buf, &n, &g_polar)) { send_text(fd, 500, "Error", "application/json", "{}"); return; }
     {
         double pt = 0, pa = 0, pm = polar_absolute_max(&g_polar, &pt, &pa);
-        APP("],\"pmax\":%.2f,\"pmax_tws\":%.1f,\"pmax_twa\":%.1f}", pm, pt, pa);
+        APP(",\"pmax\":%.2f,\"pmax_tws\":%.1f,\"pmax_twa\":%.1f}", pm, pt, pa);
     }
 #undef APP
     send_text(fd, 200, "OK", "application/json", buf);
@@ -404,7 +425,8 @@ static void serve_curve(int fd, double tws)
  * d'import.c (parse_nmea_sentence, débruitage STW/SOG, lissage, grille).
  * Sources : NMEA TCP (client) et NMEA UDP (écoute). État exposé en polling. */
 
-static int    g_live_on = 0, g_live_src = 0, g_live_fd = -1;  /* src 1=tcp 2=udp */
+static int    g_live_on = 0, g_live_src = 0, g_live_fd = -1;  /* src 1=tcp 2=udp 3=vdr */
+static int    g_live_moteur = 0;           /* moteur embrayé -> on ignore les points */
 static char   g_live_addr[128] = "";
 static long   g_live_count = 0;
 static double g_cur_twa = -1, g_cur_bsp = 0, g_cur_tws = 0;
@@ -416,6 +438,9 @@ static nmea_data_t    g_lnmea;
 static nmea_smoother_t g_lsm;
 static stw_sog_filter_t g_lfilt;
 static char   g_acc[4096]; static size_t g_acclen = 0;  /* accumulateur de ligne */
+static sqlite3 *g_vdr = NULL;              /* source VDR (tail) */
+static sqlite3_int64 g_vdr_last = 0;
+static int    g_vdr_has_sog = 0;
 
 static void live_reset(void)
 {
@@ -426,7 +451,17 @@ static void live_reset(void)
     g_cur_twa = -1; g_cur_bsp = g_cur_tws = 0; g_acclen = 0;
 }
 
-/* Une phrase NMEA complète : même pipeline que process_nmea_file. */
+/* Range un point dans la grille live + le nuage + point courant. Ignoré moteur embrayé. */
+static void live_add(double twa, double tws, double bsp)
+{
+    if (g_live_moteur) return;
+    add_data_point(&g_lgrid, twa, tws, bsp);
+    g_lpt[g_lpt_head][0] = (float)twa; g_lpt[g_lpt_head][1] = (float)bsp;
+    g_lpt_head = (g_lpt_head + 1) % LIVE_PTS; if (g_lpt_n < LIVE_PTS) g_lpt_n++;
+    g_cur_twa = twa; g_cur_bsp = bsp; g_cur_tws = tws; g_live_count++;
+}
+
+/* Une phrase NMEA complète : même pipeline que process_nmea_file (lissé). */
 static void live_feed_sentence(const char *line)
 {
     if (!parse_nmea_sentence(line, &g_lnmea)) return;
@@ -434,10 +469,47 @@ static void live_feed_sentence(const char *line)
     double twa = g_lnmea.twa, tws = g_lnmea.tws, bsp = g_lnmea.bsp;
     if (NMEA_SMOOTH_WINDOW > 1)
         nmea_smoother_push(&g_lsm, g_lnmea.twa, g_lnmea.tws, g_lnmea.bsp, &twa, &tws, &bsp);
-    add_data_point(&g_lgrid, twa, tws, bsp);
-    g_lpt[g_lpt_head][0] = (float)twa; g_lpt[g_lpt_head][1] = (float)bsp;
-    g_lpt_head = (g_lpt_head + 1) % LIVE_PTS; if (g_lpt_n < LIVE_PTS) g_lpt_n++;
-    g_cur_twa = twa; g_cur_bsp = bsp; g_cur_tws = tws; g_live_count++;
+    live_add(twa, tws, bsp);
+}
+
+/* Tick VDR : ingère les lignes ajoutées depuis le dernier TIME vu (non lissé). */
+static void live_vdr_tick(void)
+{
+    if (!g_vdr) return;
+    const char *sql = g_vdr_has_sog
+        ? "SELECT TIME,TWA,TWS,STW,SOG FROM VDR WHERE TIME>? ORDER BY TIME"
+        : "SELECT TIME,TWA,TWS,STW FROM VDR WHERE TIME>? ORDER BY TIME";
+    sqlite3_stmt *st;
+    if (sqlite3_prepare_v2(g_vdr, sql, -1, &st, NULL) != SQLITE_OK) return;
+    sqlite3_bind_int64(st, 1, g_vdr_last);
+    while (sqlite3_step(st) == SQLITE_ROW) {
+        g_vdr_last = sqlite3_column_int64(st, 0);
+        double twa = sqlite3_column_double(st, 1), tws = sqlite3_column_double(st, 2),
+               stw = sqlite3_column_double(st, 3);
+        if (g_vdr_has_sog) {
+            double sog = sqlite3_column_double(st, 4);
+            if (sog > 0 && !stw_sog_accept(&g_lfilt, stw, sog)) continue;
+        }
+        live_add(twa, tws, stw);
+    }
+    sqlite3_finalize(st);
+}
+
+/* Ouvre le VDR en lecture seule et se positionne après la dernière ligne (live). */
+static int live_vdr_open(const char *path)
+{
+    if (sqlite3_open_v2(path, &g_vdr, SQLITE_OPEN_READONLY, NULL) != SQLITE_OK) {
+        if (g_vdr) { sqlite3_close(g_vdr); g_vdr = NULL; }
+        return -1;
+    }
+    g_vdr_has_sog = vdr_has_column(g_vdr, "SOG");
+    g_vdr_last = 0;
+    sqlite3_stmt *st;
+    if (sqlite3_prepare_v2(g_vdr, "SELECT MAX(TIME) FROM VDR", -1, &st, NULL) == SQLITE_OK) {
+        if (sqlite3_step(st) == SQLITE_ROW) g_vdr_last = sqlite3_column_int64(st, 0);
+        sqlite3_finalize(st);
+    }
+    return 0;
 }
 
 /* Découpe un flux (TCP) ou datagramme (UDP) en lignes via l'accumulateur. */
@@ -484,14 +556,23 @@ static int open_udp(const char *addr)
 static void live_stop(void)
 {
     if (g_live_fd >= 0) close(g_live_fd);
-    g_live_fd = -1; g_live_on = 0;
+    g_live_fd = -1;
+    if (g_vdr) { sqlite3_close(g_vdr); g_vdr = NULL; }
+    g_live_on = 0;
 }
 
 static void live_start(int src, const char *addr)
 {
     live_stop(); live_reset();
-    int fd = (src == 1) ? open_tcp(addr) : open_udp(addr);
-    if (fd >= 0) { g_live_fd = fd; g_live_on = 1; g_live_src = src; snprintf(g_live_addr, sizeof g_live_addr, "%s", addr); }
+    int ok;
+    if (src == 3) {
+        ok = (live_vdr_open(addr) == 0);
+    } else {
+        int fd = (src == 1) ? open_tcp(addr) : open_udp(addr);
+        if (fd >= 0) g_live_fd = fd;
+        ok = (fd >= 0);
+    }
+    if (ok) { g_live_on = 1; g_live_src = src; snprintf(g_live_addr, sizeof g_live_addr, "%s", addr); }
 }
 
 /* GET /api/live : état + nuage de points + point courant (polling). */
@@ -510,7 +591,16 @@ static void serve_live(int fd)
         int idx = (start + k) % LIVE_PTS;
         APP("%s[%.1f,%.2f]", k ? "," : "", g_lpt[idx][0], g_lpt[idx][1]);
     }
-    APP("]}");
+    APP("],\"moteur\":%s,", g_live_moteur ? "true" : "false");
+    /* Polaire vivante : agrège la grille live (P90, min 3 pts) → courbes en cours. */
+    {
+        static double res[PG_MAX_ANGLES][PG_MAX_SPEEDS];
+        static PolarData lp;
+        compute_polar(&g_lgrid, res, NULL);
+        load_polar_from_grid(&lp, &g_lgrid, res);
+        if (!append_polar_curves(buf, sizeof buf, &n, &lp)) { send_text(fd, 500, "Error", "application/json", "{}"); return; }
+    }
+    APP("}");
 #undef APP
     send_text(fd, 200, "OK", "application/json", buf);
 }
@@ -552,13 +642,19 @@ static void handle_client(int fd)
     }
     else if (strncmp(path, "/api/live/start", 15) == 0) {
         const char *ps = strstr(path, "src="), *pa = strstr(path, "addr=");
-        int src = (ps && strncmp(ps + 4, "tcp", 3) == 0) ? 1 : 2;
+        int src = 2;
+        if (ps) { if (strncmp(ps + 4, "tcp", 3) == 0) src = 1; else if (strncmp(ps + 4, "vdr", 3) == 0) src = 3; }
         char addr[128] = "10110";
         if (pa) { pa += 5; size_t i = 0; while (pa[i] && pa[i] != '&' && i < sizeof addr - 1) { addr[i] = pa[i]; i++; } addr[i] = 0; }
         live_start(src, addr);
         serve_live(fd);
     }
     else if (strcmp(path, "/api/live/stop") == 0) { live_stop(); serve_live(fd); }
+    else if (strncmp(path, "/api/live/moteur", 16) == 0) {
+        const char *q = strstr(path, "on=");
+        g_live_moteur = (q && q[3] == '1') ? 1 : 0;
+        serve_live(fd);
+    }
     else if (strcmp(path, "/api/live") == 0) serve_live(fd);
     else
         send_text(fd, 404, "Not Found", "text/plain", "404\n");
@@ -651,6 +747,7 @@ int main(int argc, char **argv)
             if (got > 0) live_feed(b, (size_t)got);
             else if (got == 0 && g_live_src == 1) live_stop();  /* TCP fermé par la passerelle */
         }
+        if (g_live_on && g_live_src == 3) live_vdr_tick();      /* tail VDR (~1/s) */
     }
     close(ls);
     return 0;
