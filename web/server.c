@@ -45,7 +45,7 @@ static const char PAGE[] =
 ".hbtn{background:var(--btn);color:var(--fg);border:1px solid var(--border);padding:.25em .6em;border-radius:6px;cursor:pointer;font-size:.85em}\n"
 "main{padding:1em;display:flex;gap:1em;flex-wrap:wrap}\n"
 "#wrap{flex:1 1 480px;min-width:320px}\n"
-"#cv{width:100%;height:70vh;background:var(--panel);border:1px solid var(--border);border-radius:8px}\n"
+"#cv{width:100%;height:84vh;background:var(--panel);border:1px solid var(--border);border-radius:8px}\n"
 "aside{flex:0 0 220px}\n"
 ".card{background:var(--panel);border:1px solid var(--border);border-radius:8px;padding:.6em .9em;margin-bottom:.8em}\n"
 ".card h3{margin:.2em 0 .5em;font-size:.9em;color:var(--accent)}\n"
@@ -64,19 +64,24 @@ static const char PAGE[] =
 "<div class='card'><h3 data-i18n='range'>Plage TWS</h3>\n"
 "<label><span data-i18n='from'>De</span> <select id='from'></select></label>\n"
 "<label><span data-i18n='to'>à</span> <select id='to'></select></label></div>\n"
+"<div class='card'><h3 data-i18n='dyn'>Mode dynamique</h3>\n"
+"<label><input type=checkbox id='dyn'> <span data-i18n='dyn_on'>Activer</span></label>\n"
+"<label><span data-i18n='tws1'>TWS</span> <input type=number id='dtws' value='10' min='0' step='0.5' style='width:5em'> <span data-i18n='kn'>nœuds</span></label>\n"
+"<div id='read' style='font-size:.85em;margin-top:.4em'></div></div>\n"
 "<div class='card'><h3 data-i18n='legend'>Légende (TWS)</h3><div id='leg' class='lg'></div></div>\n"
 "<div class='card'><small id='info'></small></div>\n"
 "</aside></main>\n"
 "<script>\n"
 "let lang=localStorage.getItem('lang')||((navigator.language||'fr').toLowerCase().startsWith('fr')?'fr':'en');\n"
 "let theme=localStorage.getItem('theme')||((window.matchMedia&&matchMedia('(prefers-color-scheme: light)').matches)?'light':'dark');\n"
-"const L={fr:{range:'Plage TWS',from:'De',to:'à',legend:'Légende (TWS)',kn:'nœuds',empty:'Aucune polaire chargée.',max:'Vitesse max'},\n"
-"en:{range:'TWS range',from:'From',to:'to',legend:'Legend (TWS)',kn:'knots',empty:'No polar loaded.',max:'Max speed'}};\n"
+"const L={fr:{range:'Plage TWS',from:'De',to:'à',legend:'Légende (TWS)',kn:'nœuds',empty:'Aucune polaire chargée.',max:'Vitesse max',dyn:'Mode dynamique',dyn_on:'Activer',tws1:'TWS'},\n"
+"en:{range:'TWS range',from:'From',to:'to',legend:'Legend (TWS)',kn:'knots',empty:'No polar loaded.',max:'Max speed',dyn:'Dynamic mode',dyn_on:'Enable',tws1:'TWS'}};\n"
 "const T=k=>(L[lang]&&L[lang][k]!=null)?L[lang][k]:k;\n"
 "function i18n(){document.querySelectorAll('[data-i18n]').forEach(e=>e.textContent=T(e.dataset.i18n));document.documentElement.lang=lang;}\n"
 "const $=s=>document.querySelector(s);\n"
 "let P=null;\n"
-"function col(i,n){return 'hsl('+Math.round(360*i/Math.max(1,n))+',70%,55%)';}\n"
+"const PAL=['rgb(51,102,255)','rgb(0,204,0)','rgb(230,217,0)','rgb(255,0,255)','rgb(255,128,102)','rgb(166,166,166)','rgb(255,140,0)','rgb(102,153,255)','rgb(255,102,179)','rgb(153,153,51)','rgb(102,255,128)','rgb(0,204,204)'];\n"  /* palette GTK tws_palette_color */
+"function col(i){return PAL[((i%12)+12)%12];}\n"
 "function drawCurve(x,p,au,ad,base){const t=0.5;\n"  /* t=0.5 + réflexion aux bords = diagram.c (GTK) ; couleur par segment (VMG) */
 " for(let i=0;i<p.length-1;i++){const p1=p[i],p2=p[i+1];\n"
 "  const p0=i?p[i-1]:[2*p1[0]-p2[0],2*p1[1]-p2[1]];\n"
@@ -86,29 +91,42 @@ static const char PAGE[] =
 "  x.beginPath();x.moveTo(p1[0],p1[1]);x.bezierCurveTo(c1x,c1y,c2x,c2y,p2[0],p2[1]);x.stroke();}}\n"
 "function opt(sel,arr,val){sel.innerHTML=arr.map((v,i)=>'<option value='+i+(i===val?' selected':'')+'>'+v+' '+T('kn')+'</option>').join('');}\n"
 "function shownIdx(){let a=+$('#from').value,b=+$('#to').value;if(a>b){const t=a;a=b;b=t;}const r=[];for(let i=a;i<=b;i++)r.push(i);return r;}\n"
+"let DYN=null,CUR=null,G={cx:0,cy:0,R:0,top:1};\n"
+"function interpBS(c,twa){const p=c.pts;if(!p||!p.length)return 0;if(twa<=p[0][0])return p[0][1];if(twa>=p[p.length-1][0])return p[p.length-1][1];\n"
+" for(let i=0;i<p.length-1;i++)if(twa>=p[i][0]&&twa<=p[i+1][0]){const f=(twa-p[i][0])/((p[i+1][0]-p[i][0])||1);return p[i][1]+f*(p[i+1][1]-p[i][1]);}return 0;}\n"
 "function draw(){const c=$('#cv'),x=c.getContext('2d');const W=c.width=c.clientWidth,H=c.height=c.clientHeight;\n"
-" const cs=getComputedStyle(document.body),fg=cs.getPropertyValue('--fg'),bd=cs.getPropertyValue('--border'),mu=cs.getPropertyValue('--muted');\n"
+" const cs=getComputedStyle(document.body),bd=cs.getPropertyValue('--border'),mu=cs.getPropertyValue('--muted');\n"
 " x.clearRect(0,0,W,H);if(!P||!P.tws.length){x.fillStyle=mu;x.fillText(T('empty'),20,30);return;}\n"
-" const idx=shownIdx();let mx=0;for(const s of idx){const c=P.curves[s];if(c)for(const q of c.pts)mx=Math.max(mx,q[1]);}\n"
-" if(mx<=0)mx=1;const ring=Math.max(1,Math.ceil(mx/5));const top=Math.ceil(mx/ring)*ring;\n"
-" const cx=W*0.16,cy=H*0.5,R=Math.min(H*0.44,W*0.78);\n"
+" const dyn=$('#dyn').checked&&DYN;\n"
+" let items;if(dyn){items=[{c:DYN,color:'rgb(0,204,0)'}];}else{items=shownIdx().map(s=>({c:P.curves[s],color:col(s),s:s})).filter(o=>o.c);}\n"
+" let mx=0;for(const it of items)for(const q of it.c.pts)mx=Math.max(mx,q[1]);if(mx<=0)mx=1;\n"
+" const ring=Math.max(1,Math.ceil(mx/5));const top=Math.ceil(mx/ring)*ring;\n"
+" const cx=W*0.14,cy=H*0.5,R=Math.min(H*0.46,W*0.82);G={cx:cx,cy:cy,R:R,top:top};\n"
 " const px=(twa,bsp)=>[cx+R*bsp/top*Math.sin(twa*Math.PI/180),cy-R*bsp/top*Math.cos(twa*Math.PI/180)];\n"
 " x.strokeStyle=bd;x.fillStyle=mu;x.font='12px system-ui';x.textAlign='left';\n"
-" for(let r=ring;r<=top+0.001;r+=ring){x.beginPath();for(let t=0;t<=180;t+=2){const p=px(t,r);t===0?x.moveTo(p[0],p[1]):x.lineTo(p[0],p[1]);}x.stroke();\n"
-"  const lp=px(0,r);x.fillText(r,lp[0]+3,lp[1]+3);}\n"
-" for(let t=0;t<=180;t+=15){x.beginPath();x.moveTo(cx,cy);const p=px(t,top);x.lineTo(p[0],p[1]);x.stroke();\n"
-"  const lp=px(t,top*1.06);x.fillText(t+'°',lp[0]-6,lp[1]);}\n"
-" idx.forEach(s=>{const c=P.curves[s];if(!c||c.pts.length<2)return;\n"
-"  const pts=c.pts.map(q=>{const xy=px(q[0],q[1]);return [xy[0],xy[1],q[0]];});\n"
-"  x.lineWidth=2;drawCurve(x,pts,c.a_up,c.a_dn,col(s,P.tws.length));});\n"
-" x.lineWidth=1;\n"
-" $('#leg').innerHTML=idx.map(s=>'<div><span class=sw style=\"background:'+col(s,P.tws.length)+'\"></span>'+P.tws[s]+' '+T('kn')+'</div>').join('');\n"
+" for(let r=ring;r<=top+0.001;r+=ring){x.beginPath();for(let t=0;t<=180;t+=2){const p=px(t,r);t===0?x.moveTo(p[0],p[1]):x.lineTo(p[0],p[1]);}x.stroke();const lp=px(0,r);x.fillText(r,lp[0]+3,lp[1]+3);}\n"
+" for(let t=0;t<=180;t+=15){x.beginPath();x.moveTo(cx,cy);const p=px(t,top);x.lineTo(p[0],p[1]);x.stroke();const lp=px(t,top*1.06);x.fillText(t+'°',lp[0]-6,lp[1]);}\n"
+" x.lineWidth=2;items.forEach(it=>{if(it.c.pts.length<2)return;const pts=it.c.pts.map(q=>{const xy=px(q[0],q[1]);return [xy[0],xy[1],q[0]];});drawCurve(x,pts,it.c.a_up,it.c.a_dn,it.color);});x.lineWidth=1;\n"
+" if(dyn&&CUR){const bs=CUR.bs,tr=CUR.twa*Math.PI/180,tws=DYN.tws;\n"
+"  const aws=Math.sqrt(bs*bs+tws*tws+2*bs*tws*Math.cos(tr)),awa=Math.atan2(tws*Math.sin(tr),bs+tws*Math.cos(tr))*180/Math.PI,vmg=bs*Math.cos(tr);\n"
+"  const p=px(CUR.twa,bs);x.strokeStyle='#1f6feb';x.lineWidth=1.5;x.beginPath();x.moveTo(cx,cy);x.lineTo(p[0],p[1]);x.stroke();x.fillStyle='#1f6feb';x.beginPath();x.arc(p[0],p[1],3,0,7);x.fill();x.lineWidth=1;\n"
+"  $('#read').innerHTML='TWA <b>'+CUR.twa+'°</b> · AWA '+awa.toFixed(0)+'° · AWS '+aws.toFixed(1)+' · BS <b>'+bs.toFixed(2)+'</b> · VMG '+vmg.toFixed(2);}\n"
+" else if(dyn)$('#read').textContent='';\n"
+" if(dyn)$('#leg').innerHTML='<div><span class=sw style=\"background:rgb(0,204,0)\"></span>'+DYN.tws+' '+T('kn')+'</div>';\n"
+" else $('#leg').innerHTML=items.map(it=>'<div><span class=sw style=\"background:'+it.color+'\"></span>'+P.tws[it.s]+' '+T('kn')+'</div>').join('');\n"
 " $('#info').textContent=T('max')+' : '+mx.toFixed(2)+' '+T('kn');\n"
 "}\n"
 "async function load(){try{const r=await fetch('/api/polar');P=await r.json();}catch(e){P=null;}\n"
 " $('#fn').textContent=P&&P.filename?(' — '+P.filename):'';\n"
 " if(P&&P.tws.length){opt($('#from'),P.tws,0);opt($('#to'),P.tws,P.tws.length-1);}draw();}\n"
 "$('#from').onchange=draw;$('#to').onchange=draw;addEventListener('resize',draw);\n"
+"async function loadDyn(){const v=parseFloat($('#dtws').value)||0;try{const r=await fetch('/api/curve?tws='+v);DYN=await r.json();}catch(e){DYN=null;}CUR=null;draw();}\n"
+"$('#dyn').onchange=()=>{if($('#dyn').checked)loadDyn();else{DYN=null;CUR=null;draw();}};\n"
+"$('#dtws').onchange=()=>{if($('#dyn').checked)loadDyn();};\n"
+"$('#cv').addEventListener('mousemove',e=>{if(!($('#dyn').checked&&DYN))return;const r=e.target.getBoundingClientRect();\n"
+" const dx=(e.clientX-r.left)-G.cx,dy=G.cy-(e.clientY-r.top);let twa=Math.atan2(dx,dy)*180/Math.PI;twa=Math.max(0,Math.min(180,Math.round(twa)));\n"
+" CUR={twa:twa,bs:interpBS(DYN,twa)};draw();});\n"
+"$('#cv').addEventListener('mouseleave',()=>{if(CUR){CUR=null;draw();}});\n"
 "function applyTheme(){document.body.classList.toggle('light',theme==='light');$('#theme').textContent=theme==='dark'?'☀':'🌙';}\n"
 "$('#lang').onclick=()=>{lang=lang==='fr'?'en':'fr';localStorage.setItem('lang',lang);$('#lang').textContent=lang==='fr'?'EN':'FR';i18n();load();};\n"
 "$('#theme').onclick=()=>{theme=theme==='dark'?'light':'dark';localStorage.setItem('theme',theme);applyTheme();draw();};\n"
@@ -255,7 +273,43 @@ static void serve_polar(int fd)
         }
         APP("]}");
     }
-    APP("]}");
+    {
+        double pt = 0, pa = 0, pm = polar_absolute_max(&g_polar, &pt, &pa);
+        APP("],\"pmax\":%.2f,\"pmax_tws\":%.1f,\"pmax_twa\":%.1f}", pm, pt, pa);
+    }
+#undef APP
+    send_text(fd, 200, "OK", "application/json", buf);
+}
+
+/* GET /api/curve?tws=X : une courbe interpolée pour une TWS quelconque (mode dynamique). */
+static void serve_curve(int fd, double tws)
+{
+    if (!g_loaded || tws <= 0) { send_text(fd, 200, "OK", "application/json", "{\"tws\":0,\"a_up\":0,\"a_dn\":0,\"pts\":[]}"); return; }
+    double a_up, a_dn;
+    vmg_optimal_angles(&g_polar, tws, &a_up, &a_dn);
+    double angs[MAX_ANGLES + 2]; int m = 0;
+    for (int i = 0; i < g_polar.num_angles; i++)
+        if (g_polar.twa_present[i]) angs[m++] = g_polar.twa_values[i];
+    angs[m++] = a_up; angs[m++] = a_dn;
+    for (int i = 0; i < m - 1; i++)
+        for (int j = i + 1; j < m; j++)
+            if (angs[i] > angs[j]) { double t = angs[i]; angs[i] = angs[j]; angs[j] = t; }
+    static char buf[8192];
+    size_t n = 0; int w;
+#define APP(...) do { w = snprintf(buf + n, sizeof buf - n, __VA_ARGS__); \
+    if (w < 0 || (size_t)w >= sizeof buf - n) { send_text(fd, 500, "Error", "application/json", "{}"); return; } \
+    n += (size_t)w; } while (0)
+    APP("{\"tws\":%.2f,\"a_up\":%.1f,\"a_dn\":%.1f,\"pts\":[", tws, a_up, a_dn);
+    int np = 0; double lastang = -1, cmax = 0, cmaxa = 0;
+    for (int i = 0; i < m; i++) {
+        if (np > 0 && fabs(angs[i] - lastang) < 1e-6) continue;
+        double bsp = interpolate_polar_bsp(&g_polar, angs[i], tws);
+        if (bsp < 0.01) continue;
+        APP("%s[%.1f,%.2f]", np ? "," : "", angs[i], bsp);
+        if (bsp > cmax) { cmax = bsp; cmaxa = angs[i]; }
+        lastang = angs[i]; np++;
+    }
+    APP("],\"cmax\":%.2f,\"cmax_twa\":%.1f}", cmax, cmaxa);
 #undef APP
     send_text(fd, 200, "OK", "application/json", buf);
 }
@@ -285,6 +339,10 @@ static void handle_client(int fd)
         send_resp(fd, 200, "OK", "text/html; charset=utf-8", PAGE, sizeof PAGE - 1);
     else if (strcmp(path, "/api/polar") == 0)
         serve_polar(fd);
+    else if (strncmp(path, "/api/curve", 10) == 0) {
+        const char *q = strstr(path, "tws=");
+        serve_curve(fd, q ? atof(q + 4) : 0);
+    }
     else
         send_text(fd, 404, "Not Found", "text/plain", "404\n");
 }
