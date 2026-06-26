@@ -21,6 +21,8 @@
 #include <fcntl.h>
 #include <dirent.h>
 #include <strings.h>
+#include <poll.h>
+#include <netdb.h>
 #include <sys/stat.h>
 #include <sys/socket.h>
 #include <netinet/in.h>
@@ -82,14 +84,19 @@ static const char PAGE[] =
 "<label><input type=checkbox id='dyn'> <span data-i18n='dyn_on'>Activer</span></label>\n"
 "<label><span data-i18n='tws1'>TWS</span> <input type=number id='dtws' value='10' min='0' step='0.5' style='width:5em'> <span data-i18n='kn'>nœuds</span></label>\n"
 "<div id='read' style='font-size:.85em;margin-top:.4em'></div></div>\n"
+"<div class='card'><h3 data-i18n='live'>Live</h3>\n"
+"<label><span data-i18n='source'>Source</span> <select id='lvsrc'><option value='udp'>NMEA UDP</option><option value='tcp'>NMEA TCP</option></select></label>\n"
+"<label><input id='lvaddr' value='10110' style='width:9em' title='UDP: port · TCP: hôte:port'></label>\n"
+"<button class='hbtn' id='lvbtn' data-i18n='start'>Démarrer</button>\n"
+"<div id='lvinfo' style='font-size:.85em;margin-top:.3em'></div></div>\n"
 "<div class='card'><h3 data-i18n='legend'>Légende (TWS)</h3><div id='leg' class='lg'></div></div>\n"
 "<div class='card'><small id='info'></small></div>\n"
 "</aside></main>\n"
 "<script>\n"
 "let lang=localStorage.getItem('lang')||((navigator.language||'fr').toLowerCase().startsWith('fr')?'fr':'en');\n"
 "let theme=localStorage.getItem('theme')||((window.matchMedia&&matchMedia('(prefers-color-scheme: light)').matches)?'light':'dark');\n"
-"const L={fr:{boat:'Bateau',range:'Plage TWS',from:'De',to:'à',legend:'Légende (TWS)',kn:'nœuds',empty:'Aucune polaire chargée.',max:'Vitesse max',dyn:'Mode dynamique',dyn_on:'Activer',tws1:'TWS'},\n"
-"en:{boat:'Boat',range:'TWS range',from:'From',to:'to',legend:'Legend (TWS)',kn:'knots',empty:'No polar loaded.',max:'Max speed',dyn:'Dynamic mode',dyn_on:'Enable',tws1:'TWS'}};\n"
+"const L={fr:{boat:'Bateau',range:'Plage TWS',from:'De',to:'à',legend:'Légende (TWS)',kn:'nœuds',empty:'Aucune polaire chargée.',max:'Vitesse max',dyn:'Mode dynamique',dyn_on:'Activer',tws1:'TWS',live:'Live',source:'Source',start:'Démarrer',stop:'Arrêter'},\n"
+"en:{boat:'Boat',range:'TWS range',from:'From',to:'to',legend:'Legend (TWS)',kn:'knots',empty:'No polar loaded.',max:'Max speed',dyn:'Dynamic mode',dyn_on:'Enable',tws1:'TWS',live:'Live',source:'Source',start:'Start',stop:'Stop'}};\n"
 "const T=k=>(L[lang]&&L[lang][k]!=null)?L[lang][k]:k;\n"
 "function i18n(){document.querySelectorAll('[data-i18n]').forEach(e=>e.textContent=T(e.dataset.i18n));document.documentElement.lang=lang;}\n"
 "const $=s=>document.querySelector(s);\n"
@@ -105,7 +112,7 @@ static const char PAGE[] =
 "  x.beginPath();x.moveTo(p1[0],p1[1]);x.bezierCurveTo(c1x,c1y,c2x,c2y,p2[0],p2[1]);x.stroke();}}\n"
 "function opt(sel,arr,val){sel.innerHTML=arr.map((v,i)=>'<option value='+i+(i===val?' selected':'')+'>'+v+' '+T('kn')+'</option>').join('');}\n"
 "function shownIdx(){let a=+$('#from').value,b=+$('#to').value;if(a>b){const t=a;a=b;b=t;}const r=[];for(let i=a;i<=b;i++)r.push(i);return r;}\n"
-"let DYN=null,CUR=null,G={cx:0,cy:0,R:0,top:1};\n"
+"let DYN=null,CUR=null,LIVE=null,liveTimer=null,G={cx:0,cy:0,R:0,top:1};\n"
 "function interpBS(c,twa){const p=c.pts;if(!p||!p.length)return 0;if(twa<=p[0][0])return p[0][1];if(twa>=p[p.length-1][0])return p[p.length-1][1];\n"
 " for(let i=0;i<p.length-1;i++)if(twa>=p[i][0]&&twa<=p[i+1][0]){const f=(twa-p[i][0])/((p[i+1][0]-p[i][0])||1);return p[i][1]+f*(p[i+1][1]-p[i][1]);}return 0;}\n"
 "function draw(){const c=$('#cv'),x=c.getContext('2d');const W=c.width=c.clientWidth,H=c.height=c.clientHeight;\n"
@@ -113,7 +120,8 @@ static const char PAGE[] =
 " x.clearRect(0,0,W,H);if(!P||!P.tws.length){x.fillStyle=mu;x.fillText(T('empty'),20,30);return;}\n"
 " const dyn=$('#dyn').checked&&DYN;\n"
 " let items;if(dyn){items=[{c:DYN,color:'rgb(0,204,0)'}];}else{items=shownIdx().map(s=>({c:P.curves[s],color:col(s),s:s})).filter(o=>o.c);}\n"
-" let mx=0;for(const it of items)for(const q of it.c.pts)mx=Math.max(mx,q[1]);if(mx<=0)mx=1;\n"
+" let mx=0;for(const it of items)for(const q of it.c.pts)mx=Math.max(mx,q[1]);\n"
+" if(LIVE&&LIVE.pts){for(const q of LIVE.pts)mx=Math.max(mx,q[1]);if(LIVE.cur)mx=Math.max(mx,LIVE.cur[1]);}if(mx<=0)mx=1;\n"
 " const ring=2;const top=Math.max(ring,Math.ceil(mx/ring)*ring);\n"  /* cercles tous les 2 nœuds */
 " const cx=W*0.14,cy=H*0.5,R=Math.min(H*0.46,W*0.82);G={cx:cx,cy:cy,R:R,top:top};\n"
 " const px=(twa,bsp)=>[cx+R*bsp/top*Math.sin(twa*Math.PI/180),cy-R*bsp/top*Math.cos(twa*Math.PI/180)];\n"
@@ -121,6 +129,8 @@ static const char PAGE[] =
 " for(let r=ring;r<=top+0.001;r+=ring){x.beginPath();for(let t=0;t<=180;t+=2){const p=px(t,r);t===0?x.moveTo(p[0],p[1]):x.lineTo(p[0],p[1]);}x.stroke();const lp=px(0,r);x.fillText(r,lp[0]+3,lp[1]+3);}\n"
 " for(let t=0;t<=180;t+=15){x.beginPath();x.moveTo(cx,cy);const p=px(t,top);x.lineTo(p[0],p[1]);x.stroke();const lp=px(t,top*1.06);x.fillText(t+'°',lp[0]-6,lp[1]);}\n"
 " x.lineWidth=2;items.forEach(it=>{if(it.c.pts.length<2)return;const pts=it.c.pts.map(q=>{const xy=px(q[0],q[1]);return [xy[0],xy[1],q[0]];});drawCurve(x,pts,it.c.a_up,it.c.a_dn,it.color);});x.lineWidth=1;\n"
+" if(LIVE&&LIVE.pts){x.fillStyle='rgba(140,140,140,.55)';for(const q of LIVE.pts){const p=px(q[0],q[1]);x.beginPath();x.arc(p[0],p[1],2,0,7);x.fill();}\n"
+"  if(LIVE.cur&&LIVE.cur[1]>0){const p=px(LIVE.cur[0],LIVE.cur[1]);x.fillStyle='#e00';x.beginPath();x.arc(p[0],p[1],4.5,0,7);x.fill();}}\n"
 " if(dyn&&CUR){const bs=CUR.bs,tr=CUR.twa*Math.PI/180,tws=DYN.tws;\n"
 "  const aws=Math.sqrt(bs*bs+tws*tws+2*bs*tws*Math.cos(tr)),awa=Math.atan2(tws*Math.sin(tr),bs+tws*Math.cos(tr))*180/Math.PI,vmg=bs*Math.cos(tr);\n"
 "  const p=px(CUR.twa,bs);x.strokeStyle='#1f6feb';x.lineWidth=1.5;x.beginPath();x.moveTo(cx,cy);x.lineTo(p[0],p[1]);x.stroke();x.fillStyle='#1f6feb';x.beginPath();x.arc(p[0],p[1],3,0,7);x.fill();x.lineWidth=1;\n"
@@ -146,10 +156,18 @@ static const char PAGE[] =
 " const dx=(e.clientX-r.left)-G.cx,dy=G.cy-(e.clientY-r.top);let twa=Math.atan2(dx,dy)*180/Math.PI;twa=Math.max(0,Math.min(180,Math.round(twa)));\n"
 " CUR={twa:twa,bs:interpBS(DYN,twa)};draw();});\n"
 "$('#cv').addEventListener('mouseleave',()=>{if(CUR){CUR=null;draw();}});\n"
+"function startPoll(){if(!liveTimer)liveTimer=setInterval(pollLive,1000);}\n"
+"function stopPoll(){if(liveTimer){clearInterval(liveTimer);liveTimer=null;}}\n"
+"async function pollLive(){try{LIVE=await fetch('/api/live').then(r=>r.json());}catch(e){LIVE=null;}\n"
+" $('#lvinfo').textContent=LIVE&&LIVE.on?('● live · '+LIVE.count+' pts'+(LIVE.cur?(' · TWA '+Math.round(LIVE.cur[0])+'° · BS '+LIVE.cur[1].toFixed(2)):'')):'';\n"
+" const on=!!(LIVE&&LIVE.on);$('#lvbtn').textContent=on?T('stop'):T('start');$('#lvbtn').dataset.on=on?'1':'';draw();}\n"
+"$('#lvbtn').onclick=async()=>{if($('#lvbtn').dataset.on==='1'){await fetch('/api/live/stop');stopPoll();await pollLive();}\n"
+" else{await fetch('/api/live/start?src='+$('#lvsrc').value+'&addr='+encodeURIComponent($('#lvaddr').value));startPoll();await pollLive();}};\n"
 "function applyTheme(){document.body.classList.toggle('light',theme==='light');$('#theme').textContent=theme==='dark'?'☀':'🌙';}\n"
 "$('#lang').onclick=()=>{lang=lang==='fr'?'en':'fr';localStorage.setItem('lang',lang);$('#lang').textContent=lang==='fr'?'EN':'FR';i18n();load();};\n"
 "$('#theme').onclick=()=>{theme=theme==='dark'?'light':'dark';localStorage.setItem('theme',theme);applyTheme();draw();};\n"
 "applyTheme();$('#lang').textContent=lang==='fr'?'EN':'FR';i18n();loadBoat();load();\n"
+"pollLive().then(()=>{if(LIVE&&LIVE.on)startPoll();});\n"
 "</script></body></html>\n";
 
 /* ------------------------------------------------------------- HTTP utils --- */
@@ -381,6 +399,122 @@ static void serve_curve(int fd, double tws)
     send_text(fd, 200, "OK", "application/json", buf);
 }
 
+/* ============================ Capture live (P1) ============================ *
+ * Un seul process, intégré à la boucle poll() du serveur. Réutilise le pipeline
+ * d'import.c (parse_nmea_sentence, débruitage STW/SOG, lissage, grille).
+ * Sources : NMEA TCP (client) et NMEA UDP (écoute). État exposé en polling. */
+
+static int    g_live_on = 0, g_live_src = 0, g_live_fd = -1;  /* src 1=tcp 2=udp */
+static char   g_live_addr[128] = "";
+static long   g_live_count = 0;
+static double g_cur_twa = -1, g_cur_bsp = 0, g_cur_tws = 0;
+#define LIVE_PTS 1000
+static float  g_lpt[LIVE_PTS][2];          /* tampon circulaire (twa,bsp) pour le nuage */
+static int    g_lpt_n = 0, g_lpt_head = 0;
+static polar_grid_t   g_lgrid;             /* grille live (polaire en construction) */
+static nmea_data_t    g_lnmea;
+static nmea_smoother_t g_lsm;
+static stw_sog_filter_t g_lfilt;
+static char   g_acc[4096]; static size_t g_acclen = 0;  /* accumulateur de ligne */
+
+static void live_reset(void)
+{
+    free_polar_grid(&g_lgrid); init_polar_grid(&g_lgrid);
+    memset(&g_lnmea, 0, sizeof g_lnmea);
+    nmea_smoother_reset(&g_lsm); stw_sog_reset(&g_lfilt);
+    g_lpt_n = g_lpt_head = 0; g_live_count = 0;
+    g_cur_twa = -1; g_cur_bsp = g_cur_tws = 0; g_acclen = 0;
+}
+
+/* Une phrase NMEA complète : même pipeline que process_nmea_file. */
+static void live_feed_sentence(const char *line)
+{
+    if (!parse_nmea_sentence(line, &g_lnmea)) return;
+    if (g_lnmea.has_sog && !stw_sog_accept(&g_lfilt, g_lnmea.bsp, g_lnmea.sog)) return;
+    double twa = g_lnmea.twa, tws = g_lnmea.tws, bsp = g_lnmea.bsp;
+    if (NMEA_SMOOTH_WINDOW > 1)
+        nmea_smoother_push(&g_lsm, g_lnmea.twa, g_lnmea.tws, g_lnmea.bsp, &twa, &tws, &bsp);
+    add_data_point(&g_lgrid, twa, tws, bsp);
+    g_lpt[g_lpt_head][0] = (float)twa; g_lpt[g_lpt_head][1] = (float)bsp;
+    g_lpt_head = (g_lpt_head + 1) % LIVE_PTS; if (g_lpt_n < LIVE_PTS) g_lpt_n++;
+    g_cur_twa = twa; g_cur_bsp = bsp; g_cur_tws = tws; g_live_count++;
+}
+
+/* Découpe un flux (TCP) ou datagramme (UDP) en lignes via l'accumulateur. */
+static void live_feed(const char *buf, size_t len)
+{
+    for (size_t i = 0; i < len; i++) {
+        char c = buf[i];
+        if (c == '\n' || c == '\r') {
+            if (g_acclen) { g_acc[g_acclen] = 0; live_feed_sentence(g_acc); g_acclen = 0; }
+        } else if (g_acclen < sizeof g_acc - 1) g_acc[g_acclen++] = c;
+    }
+}
+
+static int open_tcp(const char *addr)
+{
+    char host[128] = "127.0.0.1", port[16] = "10110";
+    const char *c = strrchr(addr, ':');
+    if (c) { size_t hl = (size_t)(c - addr); if (hl && hl < sizeof host) { memcpy(host, addr, hl); host[hl] = 0; } snprintf(port, sizeof port, "%s", c + 1); }
+    else snprintf(port, sizeof port, "%s", addr);
+    struct addrinfo hints = {0}, *res = NULL;
+    hints.ai_family = AF_INET; hints.ai_socktype = SOCK_STREAM;
+    if (getaddrinfo(host, port, &hints, &res) != 0 || !res) return -1;
+    int fd = socket(res->ai_family, res->ai_socktype, 0);
+    if (fd >= 0 && connect(fd, res->ai_addr, res->ai_addrlen) != 0) { close(fd); fd = -1; }
+    freeaddrinfo(res);
+    return fd;
+}
+
+static int open_udp(const char *addr)
+{
+    const char *c = strrchr(addr, ':');
+    int port = atoi(c ? c + 1 : addr);
+    int fd = socket(AF_INET, SOCK_DGRAM, 0);
+    if (fd < 0) return -1;
+    int one = 1;
+    setsockopt(fd, SOL_SOCKET, SO_REUSEADDR, &one, sizeof one);
+    setsockopt(fd, SOL_SOCKET, SO_BROADCAST, &one, sizeof one);
+    struct sockaddr_in a = {0};
+    a.sin_family = AF_INET; a.sin_addr.s_addr = INADDR_ANY; a.sin_port = htons((uint16_t)port);
+    if (bind(fd, (struct sockaddr *)&a, sizeof a) != 0) { close(fd); return -1; }
+    return fd;
+}
+
+static void live_stop(void)
+{
+    if (g_live_fd >= 0) close(g_live_fd);
+    g_live_fd = -1; g_live_on = 0;
+}
+
+static void live_start(int src, const char *addr)
+{
+    live_stop(); live_reset();
+    int fd = (src == 1) ? open_tcp(addr) : open_udp(addr);
+    if (fd >= 0) { g_live_fd = fd; g_live_on = 1; g_live_src = src; snprintf(g_live_addr, sizeof g_live_addr, "%s", addr); }
+}
+
+/* GET /api/live : état + nuage de points + point courant (polling). */
+static void serve_live(int fd)
+{
+    static char buf[JSON_MAX]; size_t n = 0; int w;
+#define APP(...) do { w = snprintf(buf + n, sizeof buf - n, __VA_ARGS__); \
+    if (w < 0 || (size_t)w >= sizeof buf - n) { send_text(fd, 500, "Error", "application/json", "{}"); return; } \
+    n += (size_t)w; } while (0)
+    APP("{\"on\":%s,\"src\":%d,\"count\":%ld,", g_live_on ? "true" : "false", g_live_src, g_live_count);
+    if (g_cur_twa >= 0 && g_cur_bsp > 0) APP("\"cur\":[%.1f,%.2f,%.1f],", g_cur_twa, g_cur_bsp, g_cur_tws);
+    else APP("\"cur\":null,");
+    APP("\"pts\":[");
+    int start = (g_lpt_head - g_lpt_n + LIVE_PTS) % LIVE_PTS;
+    for (int k = 0; k < g_lpt_n; k++) {
+        int idx = (start + k) % LIVE_PTS;
+        APP("%s[%.1f,%.2f]", k ? "," : "", g_lpt[idx][0], g_lpt[idx][1]);
+    }
+    APP("]}");
+#undef APP
+    send_text(fd, 200, "OK", "application/json", buf);
+}
+
 /* --------------------------------------------------------------- client --- */
 static void handle_client(int fd)
 {
@@ -416,6 +550,16 @@ static void handle_client(int fd)
         const char *q = strstr(path, "i=");
         serve_select(fd, q ? atoi(q + 2) : -1);
     }
+    else if (strncmp(path, "/api/live/start", 15) == 0) {
+        const char *ps = strstr(path, "src="), *pa = strstr(path, "addr=");
+        int src = (ps && strncmp(ps + 4, "tcp", 3) == 0) ? 1 : 2;
+        char addr[128] = "10110";
+        if (pa) { pa += 5; size_t i = 0; while (pa[i] && pa[i] != '&' && i < sizeof addr - 1) { addr[i] = pa[i]; i++; } addr[i] = 0; }
+        live_start(src, addr);
+        serve_live(fd);
+    }
+    else if (strcmp(path, "/api/live/stop") == 0) { live_stop(); serve_live(fd); }
+    else if (strcmp(path, "/api/live") == 0) serve_live(fd);
     else
         send_text(fd, 404, "Not Found", "text/plain", "404\n");
 }
@@ -483,14 +627,30 @@ int main(int argc, char **argv)
     fprintf(stderr, "polar_doctor_web : http://%s:%d/  (polaire : %s, auth : %s)\n",
             bind_addr, port, g_loaded ? g_polar.filename : "(aucune)", g_auth ? "oui" : "non");
 
+    init_polar_grid(&g_lgrid);
     for (;;) {
-        int fd = accept(ls, NULL, NULL);
-        if (fd < 0) { if (errno == EINTR) continue; break; }
-        struct timeval tv = { .tv_sec = 5, .tv_usec = 0 };
-        setsockopt(fd, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof tv);
-        setsockopt(fd, SOL_SOCKET, SO_SNDTIMEO, &tv, sizeof tv);
-        handle_client(fd);
-        close(fd);
+        struct pollfd pfds[2];
+        int nf = 0;
+        pfds[nf].fd = ls; pfds[nf].events = POLLIN; nf++;
+        if (g_live_on && g_live_fd >= 0) { pfds[nf].fd = g_live_fd; pfds[nf].events = POLLIN; nf++; }
+        int r = poll(pfds, nf, g_live_on ? 1000 : -1);
+        if (r < 0) { if (errno == EINTR) continue; break; }
+        if (pfds[0].revents & POLLIN) {
+            int fd = accept(ls, NULL, NULL);
+            if (fd >= 0) {
+                struct timeval tv = { .tv_sec = 5, .tv_usec = 0 };
+                setsockopt(fd, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof tv);
+                setsockopt(fd, SOL_SOCKET, SO_SNDTIMEO, &tv, sizeof tv);
+                handle_client(fd);
+                close(fd);
+            }
+        }
+        if (g_live_on && g_live_fd >= 0 && nf > 1 && (pfds[1].revents & (POLLIN | POLLHUP))) {
+            char b[4096];
+            ssize_t got = recv(g_live_fd, b, sizeof b, 0);
+            if (got > 0) live_feed(b, (size_t)got);
+            else if (got == 0 && g_live_src == 1) live_stop();  /* TCP fermé par la passerelle */
+        }
     }
     close(ls);
     return 0;
