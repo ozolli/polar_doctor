@@ -46,6 +46,13 @@ static char g_pol_names[MAXPOL][128];
 static int  g_npol = 0;
 static int  g_cur  = 0;
 
+/* Grilles et état de la capture live (déclarés tôt : utilisés par serve_select). */
+static polar_grid_t g_grids[BOAT_MAX_POLARS];  /* 1, ou 1 par polaire si routage */
+static int   g_ng = 1, g_routing = 0, g_disp = 0;
+static long  g_gadd[BOAT_MAX_POLARS] = {0};    /* points ajoutés par grille (sauvegarde) */
+static char  g_cur_main[BOAT_TERM_LEN] = "", g_cur_head[BOAT_TERM_LEN] = "", g_cur_sea[BOAT_TERM_LEN] = "";
+static int def_index_for_selected(void);
+
 /* ------------------------------------------------------------------ SPA --- */
 static const char PAGE[] =
 "<!DOCTYPE html><html lang='fr'><head><meta charset='utf-8'>\n"
@@ -90,6 +97,10 @@ static const char PAGE[] =
 "<label><span data-i18n='source'>Source</span> <select id='lvsrc'><option value='udp'>NMEA UDP</option><option value='tcp'>NMEA TCP</option><option value='vdr'>VDR qtVlm</option></select></label>\n"
 "<label><input id='lvaddr' value='10110' style='width:9em' title='UDP: port · TCP: hôte:port · VDR: chemin .db'></label>\n"
 "<button class='hbtn' id='lvbtn' data-i18n='start'>Démarrer</button> <button class='hbtn' id='lvmot' data-i18n='moteur'>Moteur</button>\n"
+"<div id='lvstate' style='margin-top:.4em;display:none'>\n"
+"<label><span data-i18n='main1'>GV</span> <select id='lvmain'></select></label>\n"
+"<label><span data-i18n='head1'>Voile av.</span> <select id='lvhead'></select></label>\n"
+"<label><span data-i18n='sea1'>Mer</span> <select id='lvsea'></select></label></div>\n"
 "<div id='lvinfo' style='font-size:.85em;margin-top:.3em'></div></div>\n"
 "<div class='card'><h3 data-i18n='legend'>Légende (TWS)</h3><div id='leg' class='lg'></div></div>\n"
 "<div class='card'><small id='info'></small></div>\n"
@@ -97,8 +108,8 @@ static const char PAGE[] =
 "<script>\n"
 "let lang=localStorage.getItem('lang')||((navigator.language||'fr').toLowerCase().startsWith('fr')?'fr':'en');\n"
 "let theme=localStorage.getItem('theme')||((window.matchMedia&&matchMedia('(prefers-color-scheme: light)').matches)?'light':'dark');\n"
-"const L={fr:{boat:'Bateau',range:'Plage TWS',from:'De',to:'à',legend:'Légende (TWS)',kn:'nœuds',empty:'Aucune polaire chargée.',max:'Vitesse max',dyn:'Mode dynamique',dyn_on:'Activer',tws1:'TWS',live:'Live',source:'Source',start:'Démarrer',stop:'Arrêter',moteur:'Moteur'},\n"
-"en:{boat:'Boat',range:'TWS range',from:'From',to:'to',legend:'Legend (TWS)',kn:'knots',empty:'No polar loaded.',max:'Max speed',dyn:'Dynamic mode',dyn_on:'Enable',tws1:'TWS',live:'Live',source:'Source',start:'Start',stop:'Stop',moteur:'Engine'}};\n"
+"const L={fr:{boat:'Bateau',range:'Plage TWS',from:'De',to:'à',legend:'Légende (TWS)',kn:'nœuds',empty:'Aucune polaire chargée.',max:'Vitesse max',dyn:'Mode dynamique',dyn_on:'Activer',tws1:'TWS',live:'Live',source:'Source',start:'Démarrer',stop:'Arrêter',moteur:'Moteur',main1:'GV',head1:'Voile av.',sea1:'Mer'},\n"
+"en:{boat:'Boat',range:'TWS range',from:'From',to:'to',legend:'Legend (TWS)',kn:'knots',empty:'No polar loaded.',max:'Max speed',dyn:'Dynamic mode',dyn_on:'Enable',tws1:'TWS',live:'Live',source:'Source',start:'Start',stop:'Stop',moteur:'Engine',main1:'Main',head1:'Headsail',sea1:'Sea'}};\n"
 "const T=k=>(L[lang]&&L[lang][k]!=null)?L[lang][k]:k;\n"
 "function i18n(){document.querySelectorAll('[data-i18n]').forEach(e=>e.textContent=T(e.dataset.i18n));document.documentElement.lang=lang;}\n"
 "const $=s=>document.querySelector(s);\n"
@@ -152,8 +163,13 @@ static const char PAGE[] =
 "async function loadBoat(){try{const b=await fetch('/api/boat').then(r=>r.json());\n"
 " $('#bname').textContent=b.name||'';\n"
 " $('#polsel').innerHTML=(b.polars||[]).map((p,i)=>'<option value='+i+(i===b.current?' selected':'')+'>'+p+'</option>').join('');\n"
-" $('#polsel').style.display=(b.polars&&b.polars.length>1)?'':'none';}catch(e){}}\n"
-"$('#polsel').onchange=async e=>{await fetch('/api/select?i='+e.target.value);await load();if($('#dyn').checked)loadDyn();};\n"
+" $('#polsel').style.display=(b.polars&&b.polars.length>1)?'':'none';\n"
+" const inv=(b.mains&&b.mains.length)||(b.heads&&b.heads.length)||(b.seas&&b.seas.length);\n"
+" $('#lvstate').style.display=inv?'':'none';\n"
+" const fillSel=(id,arr,cur)=>{$(id).innerHTML='<option value=\"\">—</option>'+(arr||[]).map(v=>'<option'+(v===cur?' selected':'')+'>'+v+'</option>').join('');};\n"
+" if(inv){fillSel('#lvmain',b.mains,b.cur_main);fillSel('#lvhead',b.heads,b.cur_head);fillSel('#lvsea',b.seas,b.cur_sea);}\n"
+" }catch(e){}}\n"
+"$('#polsel').onchange=async e=>{await fetch('/api/select?i='+e.target.value);await load();if($('#dyn').checked)loadDyn();if($('#lvbtn').dataset.on==='1')pollLive();};\n"
 "async function loadDyn(){const v=parseFloat($('#dtws').value)||0;try{const r=await fetch('/api/curve?tws='+v);DYN=await r.json();}catch(e){DYN=null;}CUR=null;draw();}\n"
 "$('#dyn').onchange=()=>{if($('#dyn').checked)loadDyn();else{DYN=null;CUR=null;draw();}};\n"
 "$('#dtws').onchange=()=>{if($('#dyn').checked)loadDyn();};\n"
@@ -173,6 +189,8 @@ static const char PAGE[] =
 " else{await fetch('/api/live/start?src='+$('#lvsrc').value+'&addr='+encodeURIComponent($('#lvaddr').value));startPoll();await pollLive();}};\n"
 "$('#lvmot').onclick=async()=>{const on=$('#lvmot').dataset.on==='1'?0:1;await fetch('/api/live/moteur?on='+on);await pollLive();};\n"
 "$('#lvsrc').onchange=()=>{$('#lvaddr').value=$('#lvsrc').value==='vdr'?'/home/ozolli/.qtVlm/vdrs/vdr.db':'10110';};\n"
+"function sendState(){fetch('/api/live/state?main='+encodeURIComponent($('#lvmain').value)+'&head='+encodeURIComponent($('#lvhead').value)+'&sea='+encodeURIComponent($('#lvsea').value)).then(()=>pollLive());}\n"
+"$('#lvmain').onchange=sendState;$('#lvhead').onchange=sendState;$('#lvsea').onchange=sendState;\n"
 "function applyTheme(){document.body.classList.toggle('light',theme==='light');$('#theme').textContent=theme==='dark'?'☀':'🌙';}\n"
 "$('#lang').onclick=()=>{lang=lang==='fr'?'en':'fr';localStorage.setItem('lang',lang);$('#lang').textContent=lang==='fr'?'EN':'FR';i18n();load();};\n"
 "$('#theme').onclick=()=>{theme=theme==='dark'?'light':'dark';localStorage.setItem('theme',theme);applyTheme();draw();};\n"
@@ -192,6 +210,23 @@ static void json_escape(const char *in, char *out, size_t cap)
         else out[o++] = (char)c;
     }
     out[o] = '\0';
+}
+
+static int hexv(char c) { if (c >= '0' && c <= '9') return c - '0';
+    if (c >= 'a' && c <= 'f') return c - 'a' + 10; if (c >= 'A' && c <= 'F') return c - 'A' + 10; return -1; }
+
+/* Décode un composant d'URL (%XX et +) jusqu'à '&' ou fin. */
+static void url_decode(const char *in, char *out, size_t cap)
+{
+    size_t o = 0;
+    for (size_t i = 0; in[i] && in[i] != '&' && o < cap - 1; i++) {
+        if (in[i] == '%' && in[i+1] && in[i+2]) {
+            int hi = hexv(in[i+1]), lo = hexv(in[i+2]);
+            if (hi >= 0 && lo >= 0) { out[o++] = (char)(hi * 16 + lo); i += 2; continue; }
+        }
+        out[o++] = (in[i] == '+') ? ' ' : in[i];
+    }
+    out[o] = 0;
 }
 
 static void send_resp(int fd, int code, const char *status, const char *ctype,
@@ -385,7 +420,15 @@ static void serve_boat(int fd)
     char e[160]; json_escape(g_boat_name, e, sizeof e);
     APP("{\"name\":\"%s\",\"current\":%d,\"polars\":[", e, g_cur);
     for (int i = 0; i < g_npol; i++) { json_escape(g_pol_names[i], e, sizeof e); APP("%s\"%s\"", i ? "," : "", e); }
-    APP("]}");
+    APP("],\"mains\":[");
+    for (int i = 0; i < g_boat_config.n_mainsail; i++) { json_escape(g_boat_config.mainsail[i], e, sizeof e); APP("%s\"%s\"", i ? "," : "", e); }
+    APP("],\"heads\":[");
+    for (int i = 0; i < g_boat_config.n_headsail; i++) { json_escape(g_boat_config.headsail[i], e, sizeof e); APP("%s\"%s\"", i ? "," : "", e); }
+    APP("],\"seas\":[");
+    for (int i = 0; i < g_boat_config.n_seastate; i++) { json_escape(g_boat_config.seastate[i], e, sizeof e); APP("%s\"%s\"", i ? "," : "", e); }
+    { char m[80], h[80], s[80];
+      json_escape(g_cur_main, m, sizeof m); json_escape(g_cur_head, h, sizeof h); json_escape(g_cur_sea, s, sizeof s);
+      APP("],\"cur_main\":\"%s\",\"cur_head\":\"%s\",\"cur_sea\":\"%s\"}", m, h, s); }
 #undef APP
     send_text(fd, 200, "OK", "application/json", buf);
 }
@@ -397,6 +440,7 @@ static void serve_select(int fd, int i)
     PolarData tmp; init_polar_data(&tmp);
     if (load_polar_file(g_pol_paths[i], &tmp)) {
         g_polar = tmp; g_loaded = 1; g_cur = i;
+        g_disp = def_index_for_selected();   /* la polaire affichée en live suit la sélection */
         send_text(fd, 200, "OK", "application/json", "{\"ok\":true}");
     } else send_text(fd, 500, "Error", "application/json", "{\"ok\":false}");
 }
@@ -447,7 +491,6 @@ static double g_cur_twa = -1, g_cur_bsp = 0, g_cur_tws = 0;
 #define LIVE_PTS 1000
 static float  g_lpt[LIVE_PTS][2];          /* tampon circulaire (twa,bsp) pour le nuage */
 static int    g_lpt_n = 0, g_lpt_head = 0;
-static polar_grid_t   g_lgrid;             /* grille live (polaire en construction) */
 static nmea_data_t    g_lnmea;
 static nmea_smoother_t g_lsm;
 static stw_sog_filter_t g_lfilt;
@@ -457,21 +500,43 @@ static sqlite3_int64 g_vdr_last = 0;
 static int    g_vdr_has_sog = 0;
 static char   g_live_saved[600] = "";      /* chemin du .pol écrit au dernier arrêt */
 
+/* Index de la définition de polaire (boat.cfg) correspondant à la polaire
+ * sélectionnée, par nom de fichier. 0 par défaut. */
+static int def_index_for_selected(void)
+{
+    if (g_routing && g_cur >= 0 && g_cur < g_npol)
+        for (int k = 0; k < g_boat_config.n_polars; k++)
+            if (strcmp(g_boat_config.polars[k].name, g_pol_names[g_cur]) == 0) return k;
+    return 0;
+}
+
 static void live_reset(void)
 {
-    free_polar_grid(&g_lgrid); init_polar_grid(&g_lgrid);
     memset(&g_lnmea, 0, sizeof g_lnmea);
     nmea_smoother_reset(&g_lsm); stw_sog_reset(&g_lfilt);
     g_lpt_n = g_lpt_head = 0; g_live_count = 0;
     g_cur_twa = -1; g_cur_bsp = g_cur_tws = 0; g_acclen = 0;
     g_live_saved[0] = 0;
+    for (int k = 0; k < BOAT_MAX_POLARS; k++) g_gadd[k] = 0;
 }
 
-/* Range un point dans la grille live + le nuage + point courant. Ignoré moteur embrayé. */
+/* Range un point : routage multi-polaires si actif (toutes les polaires dont les
+ * critères matchent l'état courant), sinon grille unique. Le nuage et le compteur
+ * reflètent la polaire AFFICHÉE (g_disp). Ignoré si moteur embrayé. */
 static void live_add(double twa, double tws, double bsp)
 {
     if (g_live_moteur) return;
-    add_data_point(&g_lgrid, twa, tws, bsp);
+    int disp_hit = 0;
+    if (g_routing) {
+        for (int k = 0; k < g_ng; k++)
+            if (polar_def_matches(&g_boat_config.polars[k], g_cur_main, g_cur_head, g_cur_sea)) {
+                add_data_point(&g_grids[k], twa, tws, bsp); g_gadd[k]++;
+                if (k == g_disp) disp_hit = 1;
+            }
+    } else {
+        add_data_point(&g_grids[0], twa, tws, bsp); g_gadd[0]++; disp_hit = 1;
+    }
+    if (!disp_hit) return;
     g_lpt[g_lpt_head][0] = (float)twa; g_lpt[g_lpt_head][1] = (float)bsp;
     g_lpt_head = (g_lpt_head + 1) % LIVE_PTS; if (g_lpt_n < LIVE_PTS) g_lpt_n++;
     g_cur_twa = twa; g_cur_bsp = bsp; g_cur_tws = tws; g_live_count++;
@@ -580,14 +645,25 @@ static void live_stop(void)
 static void live_start(int src, const char *addr)
 {
     live_stop(); live_reset();
-    int ok;
-    if (src == 3) {
-        ok = (live_vdr_open(addr) == 0);
-    } else {
-        int fd = (src == 1) ? open_tcp(addr) : open_udp(addr);
-        if (fd >= 0) g_live_fd = fd;
-        ok = (fd >= 0);
+    /* (Re)configuration des grilles : une par polaire si le bateau en définit
+     * (routage), ensemencées depuis la polaire existante (base + live) ; sinon
+     * une grille unique repartant de zéro. */
+    for (int k = 0; k < g_ng; k++) free_polar_grid(&g_grids[k]);
+    g_routing = (g_boat_config.n_polars > 0 && g_boat_dir[0]);
+    g_ng = g_routing ? g_boat_config.n_polars : 1;
+    if (g_ng > BOAT_MAX_POLARS) g_ng = BOAT_MAX_POLARS;
+    for (int k = 0; k < g_ng; k++) {
+        init_polar_grid(&g_grids[k]);
+        if (g_routing) {
+            char pth[700]; snprintf(pth, sizeof pth, "%s/%s.pol", g_boat_dir, g_boat_config.polars[k].name);
+            load_existing_polar_for_update(pth, &g_grids[k], NULL);
+        }
     }
+    g_disp = def_index_for_selected();
+
+    int ok;
+    if (src == 3) ok = (live_vdr_open(addr) == 0);
+    else { int fd = (src == 1) ? open_tcp(addr) : open_udp(addr); if (fd >= 0) g_live_fd = fd; ok = (fd >= 0); }
     if (ok) { g_live_on = 1; g_live_src = src; snprintf(g_live_addr, sizeof g_live_addr, "%s", addr); }
 }
 
@@ -596,24 +672,38 @@ static void live_start(int src, const char *addr)
 static void live_save(void)
 {
     g_live_saved[0] = 0;
-    if (g_lgrid.point_count <= 0) return;
     static double res[PG_MAX_ANGLES][PG_MAX_SPEEDS];
     static PolarData lp;
-    compute_polar(&g_lgrid, res, NULL);
-    load_polar_from_grid(&lp, &g_lgrid, res);
-
-    char dir[512] = ".";
-    if (g_npol > 0) {
-        int i = (g_cur >= 0 && g_cur < g_npol) ? g_cur : 0;
-        snprintf(dir, sizeof dir, "%s", g_pol_paths[i]);
-        char *sl = strrchr(dir, '/');
-        if (sl) *sl = 0; else snprintf(dir, sizeof dir, ".");
+    if (g_routing) {
+        /* Une polaire par définition mise à jour (base ensemencée + live) → <nom>.pol. */
+        char names[512] = ""; int saved = 0;
+        for (int k = 0; k < g_ng; k++) {
+            if (g_gadd[k] <= 0) continue;
+            compute_polar(&g_grids[k], res, NULL);
+            load_polar_from_grid(&lp, &g_grids[k], res);
+            char path[700]; snprintf(path, sizeof path, "%s/%s.pol", g_boat_dir, g_boat_config.polars[k].name);
+            if (save_polar_file(path, &lp)) {
+                size_t l = strlen(names);
+                snprintf(names + l, sizeof names - l, "%s%s.pol", l ? ", " : "", g_boat_config.polars[k].name);
+                saved++;
+            }
+        }
+        if (saved) snprintf(g_live_saved, sizeof g_live_saved, "%s", names);
+    } else {
+        if (g_gadd[0] <= 0) return;
+        compute_polar(&g_grids[0], res, NULL);
+        load_polar_from_grid(&lp, &g_grids[0], res);
+        char dir[512] = ".";
+        if (g_npol > 0) {
+            int i = (g_cur >= 0 && g_cur < g_npol) ? g_cur : 0;
+            snprintf(dir, sizeof dir, "%s", g_pol_paths[i]);
+            char *sl = strrchr(dir, '/'); if (sl) *sl = 0; else snprintf(dir, sizeof dir, ".");
+        }
+        time_t t = time(NULL); struct tm tmv; localtime_r(&t, &tmv);
+        char ts[32]; strftime(ts, sizeof ts, "%Y%m%d_%H%M%S", &tmv);
+        char path[700]; snprintf(path, sizeof path, "%s/live_%s.pol", dir, ts);
+        if (save_polar_file(path, &lp)) snprintf(g_live_saved, sizeof g_live_saved, "%s", path);
     }
-    time_t t = time(NULL);
-    struct tm tmv; localtime_r(&t, &tmv);
-    char ts[32]; strftime(ts, sizeof ts, "%Y%m%d_%H%M%S", &tmv);
-    char path[600]; snprintf(path, sizeof path, "%s/live_%s.pol", dir, ts);
-    if (save_polar_file(path, &lp)) snprintf(g_live_saved, sizeof g_live_saved, "%s", path);
 }
 
 /* GET /api/live : état + nuage de points + point courant (polling). */
@@ -638,8 +728,8 @@ static void serve_live(int fd)
     {
         static double res[PG_MAX_ANGLES][PG_MAX_SPEEDS];
         static PolarData lp;
-        compute_polar(&g_lgrid, res, NULL);
-        load_polar_from_grid(&lp, &g_lgrid, res);
+        compute_polar(&g_grids[g_disp], res, NULL);
+        load_polar_from_grid(&lp, &g_grids[g_disp], res);
         if (!append_polar_curves(buf, sizeof buf, &n, &lp)) { send_text(fd, 500, "Error", "application/json", "{}"); return; }
     }
     APP("}");
@@ -692,6 +782,13 @@ static void handle_client(int fd)
         serve_live(fd);
     }
     else if (strcmp(path, "/api/live/stop") == 0) { live_save(); live_stop(); rescan_boat(); serve_live(fd); }
+    else if (strncmp(path, "/api/live/state", 15) == 0) {
+        const char *pm = strstr(path, "main="), *ph = strstr(path, "head="), *ps = strstr(path, "sea=");
+        if (pm) url_decode(pm + 5, g_cur_main, sizeof g_cur_main); else g_cur_main[0] = 0;
+        if (ph) url_decode(ph + 5, g_cur_head, sizeof g_cur_head); else g_cur_head[0] = 0;
+        if (ps) url_decode(ps + 4, g_cur_sea, sizeof g_cur_sea); else g_cur_sea[0] = 0;
+        serve_live(fd);
+    }
     else if (strncmp(path, "/api/live/moteur", 16) == 0) {
         const char *q = strstr(path, "on=");
         g_live_moteur = (q && q[3] == '1') ? 1 : 0;
@@ -766,7 +863,7 @@ int main(int argc, char **argv)
     fprintf(stderr, "polar_doctor_web : http://%s:%d/  (polaire : %s, auth : %s)\n",
             bind_addr, port, g_loaded ? g_polar.filename : "(aucune)", g_auth ? "oui" : "non");
 
-    init_polar_grid(&g_lgrid);
+    init_polar_grid(&g_grids[0]);
     for (;;) {
         struct pollfd pfds[2];
         int nf = 0;
