@@ -77,30 +77,32 @@ static const char PAGE[] =
 "const $=s=>document.querySelector(s);\n"
 "let P=null;\n"
 "function col(i,n){return 'hsl('+Math.round(360*i/Math.max(1,n))+',70%,55%)';}\n"
-"function spline(x,p){const t=0.5;x.beginPath();x.moveTo(p[0][0],p[0][1]);\n"  /* t=0.5 : même tension que diagram.c (GTK) */
+"function drawCurve(x,p,au,ad,base){const t=0.5;\n"  /* t=0.5 + réflexion aux bords = diagram.c (GTK) ; couleur par segment (VMG) */
 " for(let i=0;i<p.length-1;i++){const p1=p[i],p2=p[i+1];\n"
-"  const p0=i?p[i-1]:[2*p1[0]-p2[0],2*p1[1]-p2[1]];\n"               /* réflexion aux bords, comme GTK */
+"  const p0=i?p[i-1]:[2*p1[0]-p2[0],2*p1[1]-p2[1]];\n"
 "  const p3=(i+2<p.length)?p[i+2]:[2*p2[0]-p1[0],2*p2[1]-p1[1]];\n"
 "  const c1x=p1[0]+(p2[0]-p0[0])*t/6,c1y=p1[1]+(p2[1]-p0[1])*t/6,c2x=p2[0]-(p3[0]-p1[0])*t/6,c2y=p2[1]-(p3[1]-p1[1])*t/6;\n"
-"  x.bezierCurveTo(c1x,c1y,c2x,c2y,p2[0],p2[1]);}x.stroke();}\n"
+"  const mid=(p1[2]+p2[2])/2;x.strokeStyle=(mid>=au&&mid<=ad)?base:'#e00';\n"  /* utile = couleur TWS, dégradé = rouge */
+"  x.beginPath();x.moveTo(p1[0],p1[1]);x.bezierCurveTo(c1x,c1y,c2x,c2y,p2[0],p2[1]);x.stroke();}}\n"
 "function opt(sel,arr,val){sel.innerHTML=arr.map((v,i)=>'<option value='+i+(i===val?' selected':'')+'>'+v+' '+T('kn')+'</option>').join('');}\n"
 "function shownIdx(){let a=+$('#from').value,b=+$('#to').value;if(a>b){const t=a;a=b;b=t;}const r=[];for(let i=a;i<=b;i++)r.push(i);return r;}\n"
 "function draw(){const c=$('#cv'),x=c.getContext('2d');const W=c.width=c.clientWidth,H=c.height=c.clientHeight;\n"
 " const cs=getComputedStyle(document.body),fg=cs.getPropertyValue('--fg'),bd=cs.getPropertyValue('--border'),mu=cs.getPropertyValue('--muted');\n"
 " x.clearRect(0,0,W,H);if(!P||!P.tws.length){x.fillStyle=mu;x.fillText(T('empty'),20,30);return;}\n"
-" const idx=shownIdx();let mx=0;for(const s of idx)for(let a=0;a<P.twa.length;a++)mx=Math.max(mx,P.bsp[a][s]);\n"
+" const idx=shownIdx();let mx=0;for(const s of idx){const c=P.curves[s];if(c)for(const q of c.pts)mx=Math.max(mx,q[1]);}\n"
 " if(mx<=0)mx=1;const ring=Math.max(1,Math.ceil(mx/5));const top=Math.ceil(mx/ring)*ring;\n"
 " const cx=W*0.16,cy=H*0.5,R=Math.min(H*0.44,W*0.78);\n"
 " const px=(twa,bsp)=>[cx+R*bsp/top*Math.sin(twa*Math.PI/180),cy-R*bsp/top*Math.cos(twa*Math.PI/180)];\n"
 " x.strokeStyle=bd;x.fillStyle=mu;x.font='12px system-ui';x.textAlign='left';\n"
 " for(let r=ring;r<=top+0.001;r+=ring){x.beginPath();for(let t=0;t<=180;t+=2){const p=px(t,r);t===0?x.moveTo(p[0],p[1]):x.lineTo(p[0],p[1]);}x.stroke();\n"
 "  const lp=px(0,r);x.fillText(r,lp[0]+3,lp[1]+3);}\n"
-" for(let t=0;t<=180;t+=30){x.beginPath();x.moveTo(cx,cy);const p=px(t,top);x.lineTo(p[0],p[1]);x.stroke();\n"
+" for(let t=0;t<=180;t+=15){x.beginPath();x.moveTo(cx,cy);const p=px(t,top);x.lineTo(p[0],p[1]);x.stroke();\n"
 "  const lp=px(t,top*1.06);x.fillText(t+'°',lp[0]-6,lp[1]);}\n"
-" idx.forEach((s,k)=>{const pts=[];for(let a=0;a<P.twa.length;a++){const b=P.bsp[a][s];if(b>0)pts.push(px(P.twa[a],b));}\n"
-"  if(pts.length<2)return;x.strokeStyle=col(k,idx.length);x.lineWidth=2;spline(x,pts);});\n"
+" idx.forEach(s=>{const c=P.curves[s];if(!c||c.pts.length<2)return;\n"
+"  const pts=c.pts.map(q=>{const xy=px(q[0],q[1]);return [xy[0],xy[1],q[0]];});\n"
+"  x.lineWidth=2;drawCurve(x,pts,c.a_up,c.a_dn,col(s,P.tws.length));});\n"
 " x.lineWidth=1;\n"
-" $('#leg').innerHTML=idx.map((s,k)=>'<div><span class=sw style=\"background:'+col(k,idx.length)+'\"></span>'+P.tws[s]+' '+T('kn')+'</div>').join('');\n"
+" $('#leg').innerHTML=idx.map(s=>'<div><span class=sw style=\"background:'+col(s,P.tws.length)+'\"></span>'+P.tws[s]+' '+T('kn')+'</div>').join('');\n"
 " $('#info').textContent=T('max')+' : '+mx.toFixed(2)+' '+T('kn');\n"
 "}\n"
 "async function load(){try{const r=await fetch('/api/polar');P=await r.json();}catch(e){P=null;}\n"
@@ -202,7 +204,7 @@ static int authed(const char *req)
 /* ----------------------------------------------------------- API /polar --- */
 static void serve_polar(int fd)
 {
-    if (!g_loaded) { send_text(fd, 200, "OK", "application/json", "{\"filename\":\"\",\"tws\":[],\"twa\":[],\"bsp\":[]}"); return; }
+    if (!g_loaded) { send_text(fd, 200, "OK", "application/json", "{\"filename\":\"\",\"tws\":[],\"twa\":[],\"bsp\":[],\"curves\":[]}"); return; }
 
     /* indices de colonnes TWS à exposer (on saute la colonne sentinelle TWS 0). */
     int keep[MAX_SPEEDS], nk = 0;
@@ -226,6 +228,32 @@ static void serve_polar(int fd)
         APP("%s[", a ? "," : "");
         for (int k = 0; k < nk; k++) APP("%s%.2f", k ? "," : "", g_polar.polar_data[a][keep[k]]);
         APP("]");
+    }
+    /* Courbes échantillonnées comme draw_tws_curve (GTK) : rangées présentes +
+     * points-frontières VMG (a_up, a_dn) interpolés → split couleur exact côté JS. */
+    APP("],\"curves\":[");
+    for (int k = 0; k < nk; k++) {
+        double tws = g_polar.tws_values[keep[k]];
+        double a_up, a_dn;
+        vmg_optimal_angles(&g_polar, tws, &a_up, &a_dn);
+        double angs[MAX_ANGLES + 2]; int m = 0;
+        for (int i = 0; i < g_polar.num_angles; i++)
+            if (g_polar.twa_present[i]) angs[m++] = g_polar.twa_values[i];
+        angs[m++] = a_up; angs[m++] = a_dn;
+        for (int i = 0; i < m - 1; i++)
+            for (int j = i + 1; j < m; j++)
+                if (angs[i] > angs[j]) { double t = angs[i]; angs[i] = angs[j]; angs[j] = t; }
+        APP("%s{\"tws\":%d,\"a_up\":%.1f,\"a_dn\":%.1f,\"pts\":[",
+            k ? "," : "", g_polar.tws_values[keep[k]], a_up, a_dn);
+        int np = 0; double lastang = -1;
+        for (int i = 0; i < m; i++) {
+            if (np > 0 && fabs(angs[i] - lastang) < 1e-6) continue;
+            double bsp = interpolate_polar_bsp(&g_polar, angs[i], tws);
+            if (bsp < 0.01) continue;
+            APP("%s[%.1f,%.2f]", np ? "," : "", angs[i], bsp);
+            lastang = angs[i]; np++;
+        }
+        APP("]}");
     }
     APP("]}");
 #undef APP
