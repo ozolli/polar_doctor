@@ -48,15 +48,16 @@ $(TARGET): $(SRC) $(HDR)
 # Réutilise le cœur C (polar_data.c). Les cflags GTK ne servent qu'aux includes
 # (type gboolean) — aucun lien GTK/GLib (vérifiable via ldd). À terme : libpolar.
 WEB_TARGET = polar_doctor_web
-WEB_SRC    = web/server.c polar_data.c
-WEB_CFLAGS = -std=c11 -D_GNU_SOURCE -Wall -O2 -I. `pkg-config --cflags gtk+-3.0`
+WEB_SRC    = web/server.c polar_data.c import.c boat_config.c libpolar.c
+WEB_CFLAGS = -std=c11 -D_GNU_SOURCE -Wall -O2 -I. `pkg-config --cflags glib-2.0`
+WEB_LIBS   = `pkg-config --libs glib-2.0` -lsqlite3 -lm
 
 web: $(WEB_TARGET)
 
 $(WEB_TARGET): $(WEB_SRC) $(HDR)
-	@echo "Compilation de polar_doctor_web (P0)..."
-	$(CC) -o $(WEB_TARGET) $(WEB_SRC) $(WEB_CFLAGS) -lm
-	@echo "✓ Web: ./$(WEB_TARGET) [fichier.pol] --port 8081 --bind 0.0.0.0"
+	@echo "Compilation de polar_doctor_web (cœur libpolar, sans GTK)..."
+	$(CC) -o $(WEB_TARGET) $(WEB_SRC) $(WEB_CFLAGS) $(WEB_LIBS)
+	@echo "✓ Web: ./$(WEB_TARGET) [fichier.pol|dossier] --port 8081 --bind 0.0.0.0"
 
 clean:
 	@echo "Nettoyage..."

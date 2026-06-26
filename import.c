@@ -1,4 +1,9 @@
-#include "polar_doctor.h"
+#include "libpolar.h"
+
+/* Progression abstraite : relaie un message à l'UI si un callback est fourni. */
+static void prog(ProgressContext *p, const char *msg) {
+    if (p && p->update) p->update(p->ud, msg);
+}
 
 // Filtre de débruitage STW (offset STW-SOG suivi par EMA)
 void stw_sog_reset(stw_sog_filter_t *f) { f->have_offset = false; }
@@ -311,8 +316,7 @@ int process_nmea_file(const char *filename, polar_grid_t *grid, ProgressContext 
             char msg[256];
             snprintf(msg, sizeof(msg), "Lecture du fichier NMEA...\n%d lignes lues, %d points collectés",
                      line_count, data_count);
-            gtk_label_set_text(GTK_LABEL(progress->label), msg);
-            while (gtk_events_pending()) gtk_main_iteration();
+            prog(progress, msg);
             if (*progress->cancel_flag) {
                 fclose(f);
                 return -1;
@@ -504,8 +508,7 @@ int process_vdr_file(const char *filename, polar_grid_t *grid, ProgressContext *
         if (progress && data_count % 1000 == 0) {
             char msg[256];
             snprintf(msg, sizeof(msg), "Lecture du fichier VDR...\n%d points collectés", data_count);
-            gtk_label_set_text(GTK_LABEL(progress->label), msg);
-            while (gtk_events_pending()) gtk_main_iteration();
+            prog(progress, msg);
             if (*progress->cancel_flag) {
                 sqlite3_finalize(stmt);
                 sqlite3_close(db);
@@ -552,8 +555,7 @@ bool load_existing_polar_for_update(const char *filename, polar_grid_t *grid, Pr
     if (!f) return false;
 
     if (progress) {
-        gtk_label_set_text(GTK_LABEL(progress->label), "Chargement de la polaire existante...");
-        while (gtk_events_pending()) gtk_main_iteration();
+        prog(progress, "Chargement de la polaire existante...");
     }
 
     char line[PG_MAX_LINE];
@@ -596,8 +598,7 @@ void compute_polar(polar_grid_t *grid, double result[PG_MAX_ANGLES][PG_MAX_SPEED
         if (progress && angle % 10 == 0) {
             char msg[256];
             snprintf(msg, sizeof(msg), "Calcul de la polaire...\n%d%% complété", (angle * 100) / PG_MAX_ANGLES);
-            gtk_label_set_text(GTK_LABEL(progress->label), msg);
-            while (gtk_events_pending()) gtk_main_iteration();
+            prog(progress, msg);
         }
 
         for (int speed = 0; speed < PG_MAX_SPEEDS; speed++) {
@@ -614,8 +615,7 @@ bool save_polar_to_file_pg(const char *filename, polar_grid_t *grid,
     if (!f) return false;
 
     if (progress) {
-        gtk_label_set_text(GTK_LABEL(progress->label), "Sauvegarde de la polaire...");
-        while (gtk_events_pending()) gtk_main_iteration();
+        prog(progress, "Sauvegarde de la polaire...");
     }
 
     int real_angle_min = 180, real_angle_max = 0;

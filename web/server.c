@@ -13,7 +13,7 @@
  * Usage : polar_doctor_web [fichier.pol] [--port N] [--bind ADDR] [--auth user:pass]
  */
 
-#include "polar_doctor.h"
+#include "libpolar.h"
 
 #include <errno.h>
 #include <unistd.h>
@@ -151,16 +151,6 @@ static const char PAGE[] =
 "$('#theme').onclick=()=>{theme=theme==='dark'?'light':'dark';localStorage.setItem('theme',theme);applyTheme();draw();};\n"
 "applyTheme();$('#lang').textContent=lang==='fr'?'EN':'FR';i18n();loadBoat();load();\n"
 "</script></body></html>\n";
-
-/*
- * Stub inerte : polar_data.c contient load_polar_from_memory() (non utilisé par
- * le serveur) qui référence add_data_point(), défini dans import.c. On évite de
- * tirer import.c — et avec lui tout GTK (callbacks de progression) — en
- * fournissant ce stub. À RETIRER lorsque le cœur sera extrait en libpolar avec
- * un header dégraissé (sans <gtk/gtk.h>).
- */
-void add_data_point(polar_grid_t *grid, double twa, double tws, double bsp)
-{ (void)grid; (void)twa; (void)tws; (void)bsp; }
 
 /* ------------------------------------------------------------- HTTP utils --- */
 static void json_escape(const char *in, char *out, size_t cap)
@@ -458,6 +448,9 @@ int main(int argc, char **argv)
         char dir[512]; snprintf(dir, sizeof dir, "%s", pol);
         size_t L = strlen(dir); while (L > 1 && dir[L - 1] == '/') dir[--L] = '\0';
         const char *b = strrchr(dir, '/'); snprintf(g_boat_name, sizeof g_boat_name, "%s", b ? b + 1 : dir);
+        char cfg[BOAT_PATH_LEN];                 /* nom réel depuis boat.cfg si présent */
+        if (boat_find_config(dir, cfg, sizeof cfg) && boat_config_load(&g_boat_config, cfg) && g_boat_config.name[0])
+            snprintf(g_boat_name, sizeof g_boat_name, "%s", g_boat_config.name);
         scan_boat(dir);
         if (g_npol > 0 && load_polar_file(g_pol_paths[0], &g_polar)) { g_loaded = 1; g_cur = 0; }
         else fprintf(stderr, "polar_doctor_web : aucune polaire chargeable dans %s\n", dir);

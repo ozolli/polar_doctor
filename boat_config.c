@@ -1,4 +1,4 @@
-#include "polar_doctor.h"
+#include "libpolar.h"
 
 // État de la mer : échelle normalisée OMM / Douglas (degrés 0 à 9), pré-remplie
 // pour chaque bateau (reste éditable ; un [seastates] dans le boat.cfg la remplace).

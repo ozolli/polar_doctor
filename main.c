@@ -1,11 +1,7 @@
 #include "polar_doctor.h"
 
-int g_polar_percentile = DEFAULT_POLAR_PERCENTILE;
-BoatConfig g_boat_config;
-char g_boat_config_path[BOAT_PATH_LEN] = "";
-polar_router_t *g_polar_router = NULL;
-polar_grid_t *g_live_grid = NULL;
-double g_live_cur_twa = 0.0, g_live_cur_bsp = 0.0;
+// Les globals du cœur (g_polar_percentile, g_boat_config, g_polar_router…) sont
+// définis dans libpolar.c afin d'être partagés avec l'interface web sans GTK.
 
 int main(int argc, char *argv[]) {
     // Fix pour Windows - désactive les portails GTK qui peuvent causer des crashes

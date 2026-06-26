@@ -1,4 +1,4 @@
-#include "polar_doctor.h"
+#include "libpolar.h"
 
 void load_polar_from_memory(PolarData *data, polar_grid_t *grid) {
     // Convertir les données en mémoire vers la grille polar_generator

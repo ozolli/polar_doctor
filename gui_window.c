@@ -2,6 +2,12 @@
 
 static int populate_polar_selector(AppWidgets *app, const char *folder);  // défini plus bas
 
+// Callback de progression GTK : rafraîchit le label et pompe la boucle d'événements.
+static void gtk_progress_update(void *ud, const char *msg) {
+    gtk_label_set_text(GTK_LABEL(ud), msg);
+    while (gtk_events_pending()) gtk_main_iteration();
+}
+
 // Calcule une grille et l'enregistre en .pol au chemin donné.
 static bool grid_to_polar_file(polar_grid_t *grid, const char *path, ProgressContext *progress) {
     double polar[PG_MAX_ANGLES][PG_MAX_SPEEDS];
@@ -169,7 +175,7 @@ void on_create_clicked(GtkWidget *widget, gpointer user_data) {
         gtk_widget_show_all(progress_dialog);
 
         gboolean cancel_flag = FALSE;
-        ProgressContext progress = {progress_dialog, progress_label, &cancel_flag};
+        ProgressContext progress = {gtk_progress_update, progress_label, &cancel_flag};
 
         if (g_boat_config.n_polars > 0 && g_boat_config_path[0]) {
             // Mode bateau : router les données vers une polaire par définition.
@@ -349,7 +355,7 @@ void on_update_clicked(GtkWidget *widget, gpointer user_data) {
         gtk_widget_show_all(progress_dialog);
 
         gboolean cancel_flag = FALSE;
-        ProgressContext progress = {progress_dialog, progress_label, &cancel_flag};
+        ProgressContext progress = {gtk_progress_update, progress_label, &cancel_flag};
 
         if (routing) {
             // Mode bateau : mettre à jour chaque <nom>.pol existant via le routage.
