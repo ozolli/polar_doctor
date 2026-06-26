@@ -77,10 +77,11 @@ static const char PAGE[] =
 "const $=s=>document.querySelector(s);\n"
 "let P=null;\n"
 "function col(i,n){return 'hsl('+Math.round(360*i/Math.max(1,n))+',70%,55%)';}\n"
-"function spline(x,p){x.beginPath();x.moveTo(p[0][0],p[0][1]);\n"
-" if(p.length===2){x.lineTo(p[1][0],p[1][1]);x.stroke();return;}\n"
-" for(let i=0;i<p.length-1;i++){const p0=p[i?i-1:0],p1=p[i],p2=p[i+1],p3=p[i+2<p.length?i+2:p.length-1];\n"
-"  const c1x=p1[0]+(p2[0]-p0[0])/6,c1y=p1[1]+(p2[1]-p0[1])/6,c2x=p2[0]-(p3[0]-p1[0])/6,c2y=p2[1]-(p3[1]-p1[1])/6;\n"
+"function spline(x,p){const t=0.5;x.beginPath();x.moveTo(p[0][0],p[0][1]);\n"  /* t=0.5 : même tension que diagram.c (GTK) */
+" for(let i=0;i<p.length-1;i++){const p1=p[i],p2=p[i+1];\n"
+"  const p0=i?p[i-1]:[2*p1[0]-p2[0],2*p1[1]-p2[1]];\n"               /* réflexion aux bords, comme GTK */
+"  const p3=(i+2<p.length)?p[i+2]:[2*p2[0]-p1[0],2*p2[1]-p1[1]];\n"
+"  const c1x=p1[0]+(p2[0]-p0[0])*t/6,c1y=p1[1]+(p2[1]-p0[1])*t/6,c2x=p2[0]-(p3[0]-p1[0])*t/6,c2y=p2[1]-(p3[1]-p1[1])*t/6;\n"
 "  x.bezierCurveTo(c1x,c1y,c2x,c2y,p2[0],p2[1]);}x.stroke();}\n"
 "function opt(sel,arr,val){sel.innerHTML=arr.map((v,i)=>'<option value='+i+(i===val?' selected':'')+'>'+v+' '+T('kn')+'</option>').join('');}\n"
 "function shownIdx(){let a=+$('#from').value,b=+$('#to').value;if(a>b){const t=a;a=b;b=t;}const r=[];for(let i=a;i<=b;i++)r.push(i);return r;}\n"
