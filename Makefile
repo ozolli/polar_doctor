@@ -34,7 +34,7 @@ ifeq ($(OS),Windows_NT)
 endif
 
 # Règles de compilation
-.PHONY: all clean install uninstall help dist
+.PHONY: all web clean install uninstall help dist
 
 all: $(TARGET)
 	@echo "✓ Compilation terminée pour $(PLATFORM)"
@@ -44,9 +44,23 @@ $(TARGET): $(SRC) $(HDR)
 	@echo "Compilation de Polar Doctor pour $(PLATFORM)..."
 	$(CC) -o $(TARGET) $(SRC) $(CFLAGS) $(LDFLAGS)
 
+# --- Interface web (P0 : serveur HTTP zéro-dépendance + diagramme Canvas read-only) ---
+# Réutilise le cœur C (polar_data.c). Les cflags GTK ne servent qu'aux includes
+# (type gboolean) — aucun lien GTK/GLib (vérifiable via ldd). À terme : libpolar.
+WEB_TARGET = polar_doctor_web
+WEB_SRC    = web/server.c polar_data.c
+WEB_CFLAGS = -std=c11 -D_GNU_SOURCE -Wall -O2 -I. `pkg-config --cflags gtk+-3.0`
+
+web: $(WEB_TARGET)
+
+$(WEB_TARGET): $(WEB_SRC) $(HDR)
+	@echo "Compilation de polar_doctor_web (P0)..."
+	$(CC) -o $(WEB_TARGET) $(WEB_SRC) $(WEB_CFLAGS) -lm
+	@echo "✓ Web: ./$(WEB_TARGET) [fichier.pol] --port 8080 --bind 0.0.0.0"
+
 clean:
 	@echo "Nettoyage..."
-	rm -f $(TARGET) polar_doctor.exe
+	rm -f $(TARGET) polar_doctor.exe $(WEB_TARGET)
 	rm -rf build/ dist/ *.o
 	@echo "✓ Nettoyage terminé"
 
@@ -121,7 +135,8 @@ help:
 	@echo "Polar Doctor - Makefile"
 	@echo ""
 	@echo "Utilisation:"
-	@echo "  make              - Compiler Polar Doctor"
+	@echo "  make              - Compiler Polar Doctor (GTK)"
+	@echo "  make web          - Compiler l'interface web (polar_doctor_web)"
 	@echo "  make clean        - Supprimer les fichiers compilés"
 	@echo "  make install      - Installer sur le système (Linux/macOS, nécessite sudo)"
 	@echo "  make uninstall    - Désinstaller (Linux/macOS, nécessite sudo)"
