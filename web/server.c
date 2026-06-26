@@ -23,6 +23,7 @@
 #include <strings.h>
 #include <poll.h>
 #include <netdb.h>
+#include <time.h>
 #include <sys/stat.h>
 #include <sys/socket.h>
 #include <netinet/in.h>
@@ -39,6 +40,7 @@ static char         g_auth_b64[352];
 /* Bateau = dossier de .pol (liste POSIX ; le boat.cfg viendra avec libpolar). */
 #define MAXPOL 64
 static char g_boat_name[128] = "";
+static char g_boat_dir[512]  = "";   // dossier-bateau (pour re-scan après sauvegarde live)
 static char g_pol_paths[MAXPOL][512];
 static char g_pol_names[MAXPOL][128];
 static int  g_npol = 0;
@@ -162,11 +164,12 @@ static const char PAGE[] =
 "function startPoll(){if(!liveTimer)liveTimer=setInterval(pollLive,1000);}\n"
 "function stopPoll(){if(liveTimer){clearInterval(liveTimer);liveTimer=null;}}\n"
 "async function pollLive(){try{LIVE=await fetch('/api/live').then(r=>r.json());}catch(e){LIVE=null;}\n"
-" $('#lvinfo').textContent=LIVE&&LIVE.on?('● live · '+LIVE.count+' pts'+(LIVE.cur?(' · TWA '+Math.round(LIVE.cur[0])+'° · BS '+LIVE.cur[1].toFixed(2)):'')):'';\n"
+" if(LIVE&&LIVE.on)$('#lvinfo').textContent='● live · '+LIVE.count+' pts'+(LIVE.cur?(' · TWA '+Math.round(LIVE.cur[0])+'° · BS '+LIVE.cur[1].toFixed(2)):'');\n"
+" else $('#lvinfo').textContent=(LIVE&&LIVE.saved)?('✓ '+LIVE.saved.split('/').pop()):'';\n"
 " const on=!!(LIVE&&LIVE.on);$('#lvbtn').textContent=on?T('stop'):T('start');$('#lvbtn').dataset.on=on?'1':'';\n"
 " const mot=!!(LIVE&&LIVE.moteur);$('#lvmot').dataset.on=mot?'1':'';$('#lvmot').style.background=mot?'var(--active)':'';$('#lvmot').style.color=mot?'#fff':'';\n"
 " draw();}\n"
-"$('#lvbtn').onclick=async()=>{if($('#lvbtn').dataset.on==='1'){await fetch('/api/live/stop');stopPoll();await pollLive();}\n"
+"$('#lvbtn').onclick=async()=>{if($('#lvbtn').dataset.on==='1'){await fetch('/api/live/stop');stopPoll();await loadBoat();await pollLive();}\n"
 " else{await fetch('/api/live/start?src='+$('#lvsrc').value+'&addr='+encodeURIComponent($('#lvaddr').value));startPoll();await pollLive();}};\n"
 "$('#lvmot').onclick=async()=>{const on=$('#lvmot').dataset.on==='1'?0:1;await fetch('/api/live/moteur?on='+on);await pollLive();};\n"
 "$('#lvsrc').onchange=()=>{$('#lvaddr').value=$('#lvsrc').value==='vdr'?'/home/ozolli/.qtVlm/vdrs/vdr.db':'10110';};\n"
@@ -361,6 +364,17 @@ static void scan_boat(const char *dir)
             }
 }
 
+/* Re-scanne le dossier-bateau en conservant la polaire courante (par nom). */
+static void rescan_boat(void)
+{
+    if (!g_boat_dir[0]) return;
+    char cur[128] = "";
+    if (g_cur >= 0 && g_cur < g_npol) snprintf(cur, sizeof cur, "%s", g_pol_names[g_cur]);
+    g_npol = 0; scan_boat(g_boat_dir);
+    g_cur = 0;
+    for (int i = 0; i < g_npol; i++) if (strcmp(g_pol_names[i], cur) == 0) { g_cur = i; break; }
+}
+
 /* GET /api/boat : nom du bateau + liste des polaires + index courant. */
 static void serve_boat(int fd)
 {
@@ -441,6 +455,7 @@ static char   g_acc[4096]; static size_t g_acclen = 0;  /* accumulateur de ligne
 static sqlite3 *g_vdr = NULL;              /* source VDR (tail) */
 static sqlite3_int64 g_vdr_last = 0;
 static int    g_vdr_has_sog = 0;
+static char   g_live_saved[600] = "";      /* chemin du .pol écrit au dernier arrêt */
 
 static void live_reset(void)
 {
@@ -449,6 +464,7 @@ static void live_reset(void)
     nmea_smoother_reset(&g_lsm); stw_sog_reset(&g_lfilt);
     g_lpt_n = g_lpt_head = 0; g_live_count = 0;
     g_cur_twa = -1; g_cur_bsp = g_cur_tws = 0; g_acclen = 0;
+    g_live_saved[0] = 0;
 }
 
 /* Range un point dans la grille live + le nuage + point courant. Ignoré moteur embrayé. */
@@ -575,6 +591,31 @@ static void live_start(int src, const char *addr)
     if (ok) { g_live_on = 1; g_live_src = src; snprintf(g_live_addr, sizeof g_live_addr, "%s", addr); }
 }
 
+/* Agrège la grille live et l'enregistre en .pol horodaté dans le dossier du
+ * bateau (ou le dossier de la polaire courante). Appelé à l'arrêt explicite. */
+static void live_save(void)
+{
+    g_live_saved[0] = 0;
+    if (g_lgrid.point_count <= 0) return;
+    static double res[PG_MAX_ANGLES][PG_MAX_SPEEDS];
+    static PolarData lp;
+    compute_polar(&g_lgrid, res, NULL);
+    load_polar_from_grid(&lp, &g_lgrid, res);
+
+    char dir[512] = ".";
+    if (g_npol > 0) {
+        int i = (g_cur >= 0 && g_cur < g_npol) ? g_cur : 0;
+        snprintf(dir, sizeof dir, "%s", g_pol_paths[i]);
+        char *sl = strrchr(dir, '/');
+        if (sl) *sl = 0; else snprintf(dir, sizeof dir, ".");
+    }
+    time_t t = time(NULL);
+    struct tm tmv; localtime_r(&t, &tmv);
+    char ts[32]; strftime(ts, sizeof ts, "%Y%m%d_%H%M%S", &tmv);
+    char path[600]; snprintf(path, sizeof path, "%s/live_%s.pol", dir, ts);
+    if (save_polar_file(path, &lp)) snprintf(g_live_saved, sizeof g_live_saved, "%s", path);
+}
+
 /* GET /api/live : état + nuage de points + point courant (polling). */
 static void serve_live(int fd)
 {
@@ -591,7 +632,8 @@ static void serve_live(int fd)
         int idx = (start + k) % LIVE_PTS;
         APP("%s[%.1f,%.2f]", k ? "," : "", g_lpt[idx][0], g_lpt[idx][1]);
     }
-    APP("],\"moteur\":%s,", g_live_moteur ? "true" : "false");
+    { char e[700]; json_escape(g_live_saved, e, sizeof e);
+      APP("],\"moteur\":%s,\"saved\":\"%s\",", g_live_moteur ? "true" : "false", e); }
     /* Polaire vivante : agrège la grille live (P90, min 3 pts) → courbes en cours. */
     {
         static double res[PG_MAX_ANGLES][PG_MAX_SPEEDS];
@@ -649,7 +691,7 @@ static void handle_client(int fd)
         live_start(src, addr);
         serve_live(fd);
     }
-    else if (strcmp(path, "/api/live/stop") == 0) { live_stop(); serve_live(fd); }
+    else if (strcmp(path, "/api/live/stop") == 0) { live_save(); live_stop(); rescan_boat(); serve_live(fd); }
     else if (strncmp(path, "/api/live/moteur", 16) == 0) {
         const char *q = strstr(path, "on=");
         g_live_moteur = (q && q[3] == '1') ? 1 : 0;
@@ -691,6 +733,7 @@ int main(int argc, char **argv)
         char cfg[BOAT_PATH_LEN];                 /* nom réel depuis boat.cfg si présent */
         if (boat_find_config(dir, cfg, sizeof cfg) && boat_config_load(&g_boat_config, cfg) && g_boat_config.name[0])
             snprintf(g_boat_name, sizeof g_boat_name, "%s", g_boat_config.name);
+        snprintf(g_boat_dir, sizeof g_boat_dir, "%s", dir);
         scan_boat(dir);
         if (g_npol > 0 && load_polar_file(g_pol_paths[0], &g_polar)) { g_loaded = 1; g_cur = 0; }
         else fprintf(stderr, "polar_doctor_web : aucune polaire chargeable dans %s\n", dir);
