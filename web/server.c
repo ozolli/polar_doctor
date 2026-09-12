@@ -82,10 +82,12 @@ static const char PAGE[] =
 ".dt{border-collapse:collapse;font-size:.85em}.dt th,.dt td{border:1px solid var(--border);padding:2px 5px;text-align:center}\n"
 ".dt input.dc{width:4.4em;background:var(--inbg);color:var(--fg);border:1px solid var(--border);border-radius:3px;text-align:right;font-variant-numeric:tabular-nums}\n"
 ".delx{background:none;border:0;color:var(--muted);cursor:pointer;font-size:.75em;padding:0}\n"
+".sl{display:inline-block;font-size:.82em;white-space:nowrap;margin:0 .6em .15em 0}\n"
+"#cfgform input[type=text],#cfgform input:not([type]){background:var(--inbg);color:var(--fg);border:1px solid var(--border);border-radius:4px;padding:.15em .3em}\n"
 "@media print{header nav,#prt,#lang,#theme,aside{display:none!important}#wrap{flex:1 1 100%}}\n"
 "</style></head><body>\n"
 "<header><b>Polar Doctor</b><small id='fn'></small>\n"
-"<nav><button data-v='diag' class='on' data-i18n='tabdiag'>Diagramme</button><button data-v='data' data-i18n='tabdata'>Données</button><button data-v='vmg' data-i18n='tabvmg'>VMG</button></nav>\n"
+"<nav><button data-v='diag' class='on' data-i18n='tabdiag'>Diagramme</button><button data-v='data' data-i18n='tabdata'>Données</button><button data-v='vmg' data-i18n='tabvmg'>VMG</button><button data-v='cfg' data-i18n='tabcfg'>Bateau</button></nav>\n"
 "<span style='margin-left:auto;display:flex;gap:.5em'>"
 "<button id='prt' class='hbtn' title='Imprimer / PDF'>⎙</button>"
 "<button id='lang' class='hbtn'></button><button id='theme' class='hbtn'></button></span></header>\n"
@@ -132,11 +134,16 @@ static const char PAGE[] =
 "<button class='hbtn' id='btnCreate' data-i18n='create1'>Créer</button> <button class='hbtn' id='btnUpdate' data-i18n='update1'>Mettre à jour</button> <span id='impmsg' style='font-size:.85em;color:var(--muted)'></span></div>\n"
 "<div id='dtable' style='overflow:auto'></div></div>\n"
 "<div id='mvmg' style='display:none;padding:1em'><div id='vmgtable' style='overflow:auto'></div></div>\n"
+"<div id='mcfg' style='display:none;padding:1em;max-width:900px'>\n"
+"<div style='margin-bottom:.6em'><button class='hbtn' id='btnCfgSave' data-i18n='save1'>Enregistrer</button> "
+"<button class='hbtn' id='btnAddPolar' data-i18n='addpolar'>+ Polaire</button> "
+"<span id='cfgmsg' style='font-size:.85em;color:var(--muted)'></span></div>\n"
+"<div id='cfgform'></div></div>\n"
 "<script>\n"
 "let lang=localStorage.getItem('lang')||((navigator.language||'fr').toLowerCase().startsWith('fr')?'fr':'en');\n"
 "let theme=localStorage.getItem('theme')||((window.matchMedia&&matchMedia('(prefers-color-scheme: light)').matches)?'light':'dark');\n"
-"const L={fr:{boat:'Bateau',range:'Plage TWS',from:'De',to:'à',legend:'Légende (TWS)',kn:'nœuds',empty:'Aucune polaire chargée.',max:'Vitesse max',dyn:'Mode dynamique',dyn_on:'Activer',tws1:'TWS',live:'Live',source:'Source',start:'Démarrer',stop:'Arrêter',moteur:'Moteur',main1:'GV',head1:'Voile av.',sea1:'Mer',tabdiag:'Diagramme',tabdata:'Données',save1:'Enregistrer',addtwa:'+ TWA',addtws:'+ TWS',import:'Import fichiers',create1:'Créer',update1:'Mettre à jour',tabvmg:'VMG',vmgup:'Près',vmgdn:'Portant',recent:'Récents',open1:'Ouvrir',new1:'Nouveau'},\n"
-"en:{boat:'Boat',range:'TWS range',from:'From',to:'to',legend:'Legend (TWS)',kn:'knots',empty:'No polar loaded.',max:'Max speed',dyn:'Dynamic mode',dyn_on:'Enable',tws1:'TWS',live:'Live',source:'Source',start:'Start',stop:'Stop',moteur:'Engine',main1:'Main',head1:'Headsail',sea1:'Sea',tabdiag:'Diagram',tabdata:'Data',save1:'Save',addtwa:'+ TWA',addtws:'+ TWS',import:'Import files',create1:'Create',update1:'Update',tabvmg:'VMG',vmgup:'Upwind',vmgdn:'Downwind',recent:'Recent',open1:'Open',new1:'New'}};\n"
+"const L={fr:{boat:'Bateau',range:'Plage TWS',from:'De',to:'à',legend:'Légende (TWS)',kn:'nœuds',empty:'Aucune polaire chargée.',max:'Vitesse max',dyn:'Mode dynamique',dyn_on:'Activer',tws1:'TWS',live:'Live',source:'Source',start:'Démarrer',stop:'Arrêter',moteur:'Moteur',main1:'GV',head1:'Voile av.',sea1:'Mer',tabdiag:'Diagramme',tabdata:'Données',save1:'Enregistrer',addtwa:'+ TWA',addtws:'+ TWS',import:'Import fichiers',create1:'Créer',update1:'Mettre à jour',tabvmg:'VMG',vmgup:'Près',vmgdn:'Portant',recent:'Récents',open1:'Ouvrir',new1:'Nouveau',tabcfg:'Bateau',addpolar:'+ Polaire',cfgname:'Nom',charge1:'Charge',polars1:'Polaires'},\n"
+"en:{boat:'Boat',range:'TWS range',from:'From',to:'to',legend:'Legend (TWS)',kn:'knots',empty:'No polar loaded.',max:'Max speed',dyn:'Dynamic mode',dyn_on:'Enable',tws1:'TWS',live:'Live',source:'Source',start:'Start',stop:'Stop',moteur:'Engine',main1:'Main',head1:'Headsail',sea1:'Sea',tabdiag:'Diagram',tabdata:'Data',save1:'Save',addtwa:'+ TWA',addtws:'+ TWS',import:'Import files',create1:'Create',update1:'Update',tabvmg:'VMG',vmgup:'Upwind',vmgdn:'Downwind',recent:'Recent',open1:'Open',new1:'New',tabcfg:'Boat',addpolar:'+ Polar',cfgname:'Name',charge1:'Charge',polars1:'Polars'}};\n"
 "const T=k=>(L[lang]&&L[lang][k]!=null)?L[lang][k]:k;\n"
 "function i18n(){document.querySelectorAll('[data-i18n]').forEach(e=>e.textContent=T(e.dataset.i18n));document.documentElement.lang=lang;}\n"
 "const $=s=>document.querySelector(s);\n"
@@ -247,7 +254,37 @@ static const char PAGE[] =
 " const r=await fetch('/api/import?mode='+(upd?'update':'create'),{method:'POST',body:paths});const d=await r.json().catch(()=>({}));\n"
 " if(d.ok){$('#impmsg').textContent='✓ '+d.files+' fich., '+d.points+' pts → '+(d.saved.split('/').pop());await loadBoat();await load();renderTable();}else $('#impmsg').textContent='✗';}\n"
 "$('#btnCreate').onclick=()=>doImport(false);$('#btnUpdate').onclick=()=>doImport(true);\n"
-"document.querySelectorAll('header nav button').forEach(b=>b.onclick=()=>{const v=b.dataset.v;$('#mdiag').style.display=v==='diag'?'':'none';$('#mdata').style.display=v==='data'?'':'none';$('#mvmg').style.display=v==='vmg'?'':'none';document.querySelectorAll('header nav button').forEach(x=>x.classList.toggle('on',x===b));if(v==='data')renderTable();if(v==='vmg')renderVmg();});\n"
+"let CFG=null;\n"
+"const esc=s=>String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/\"/g,'&quot;');\n"
+"async function loadCfg(){try{CFG=await fetch('/api/config').then(r=>r.json());}catch(e){CFG=null;}renderCfg();}\n"
+"function cfgGrp(dim,i,all,sel){const lbl=dim==='mains'?T('main1'):dim==='heads'?T('head1'):T('sea1');\n"
+" return '<div style=\"margin-top:.3em\"><small>'+lbl+'</small><br>'+(all||[]).map(v=>'<label class=sl><input type=checkbox class=pcb data-i='+i+' data-d='+dim+' value=\"'+esc(v)+'\"'+((sel||[]).indexOf(v)>=0?' checked':'')+'> '+esc(v)+'</label>').join('')+'</div>';}\n"
+"function renderCfg(){if(!CFG){$('#cfgform').innerHTML='';return;}\n"
+" const ta=(id,label,arr)=>'<div class=card><h3>'+label+'</h3><textarea id='+id+' rows=5 style=\"width:100%;background:var(--inbg);color:var(--fg);border:1px solid var(--border);border-radius:4px\">'+esc((arr||[]).join('\\n'))+'</textarea></div>';\n"
+" let h='<div class=card><label>'+T('cfgname')+' <input id=cfgname value=\"'+esc(CFG.name||'')+'\"></label></div>';\n"
+" h+=ta('cfgmains',T('main1'),CFG.mains)+ta('cfgheads',T('head1'),CFG.heads)+ta('cfgseas',T('sea1'),CFG.seas);\n"
+" h+='<div class=card><h3>'+T('moteur')+'</h3><label>'+T('moteur')+' <input id=cfgmot value=\"'+esc(CFG.moteur||'')+'\"></label> <label>'+T('charge1')+' <input id=cfgchg value=\"'+esc(CFG.charge||'')+'\"></label></div>';\n"
+" h+='<div class=card><h3>'+T('polars1')+'</h3>';\n"
+" (CFG.polars||[]).forEach((p,i)=>{h+='<div class=card><label>'+T('cfgname')+' <input class=pname data-i='+i+' value=\"'+esc(p.name||'')+'\"></label> <button class=delx data-p='+i+'>✕</button>'+cfgGrp('mains',i,CFG.mains,p.mains)+cfgGrp('heads',i,CFG.heads,p.heads)+cfgGrp('seas',i,CFG.seas,p.seas)+'</div>';});\n"
+" $('#cfgform').innerHTML=h+'</div>';}\n"
+"$('#cfgform').addEventListener('change',e=>{const t=e.target;if(!CFG)return;const lines=v=>v.split('\\n').map(s=>s.trim()).filter(Boolean);\n"
+" if(t.id==='cfgname')CFG.name=t.value.trim();\n"
+" else if(t.id==='cfgmot')CFG.moteur=t.value.trim();\n"
+" else if(t.id==='cfgchg')CFG.charge=t.value.trim();\n"
+" else if(t.id==='cfgmains'){CFG.mains=lines(t.value);renderCfg();}\n"
+" else if(t.id==='cfgheads'){CFG.heads=lines(t.value);renderCfg();}\n"
+" else if(t.id==='cfgseas'){CFG.seas=lines(t.value);renderCfg();}\n"
+" else if(t.classList.contains('pname'))CFG.polars[+t.dataset.i].name=t.value.trim();\n"
+" else if(t.classList.contains('pcb')){const p=CFG.polars[+t.dataset.i],d=t.dataset.d,a=p[d]||(p[d]=[]);const j=a.indexOf(t.value);\n"
+"  if(t.checked){if(j<0)a.push(t.value);}else if(j>=0)a.splice(j,1);}});\n"
+"$('#cfgform').addEventListener('click',e=>{if(!e.target.classList.contains('delx'))return;const i=+e.target.dataset.p;if(isNaN(i))return;CFG.polars.splice(i,1);renderCfg();});\n"
+"$('#btnAddPolar').onclick=()=>{if(!CFG)return;(CFG.polars=CFG.polars||[]).push({name:'Polaire'+((CFG.polars||[]).length+1),mains:[],heads:[],seas:[]});renderCfg();};\n"
+"function genCfg(){let s='[boat]\\nname = '+CFG.name+'\\n\\n[mainsail]\\n'+(CFG.mains||[]).join('\\n')+'\\n\\n[headsails]\\n'+(CFG.heads||[]).join('\\n')+'\\n\\n[seastates]\\n'+(CFG.seas||[]).join('\\n')+'\\n\\n[engine]\\nmoteur = '+(CFG.moteur||'')+'\\ncharge = '+(CFG.charge||'')+'\\n\\n[polars]\\n';\n"
+" (CFG.polars||[]).forEach(p=>{s+=p.name+' = mains: '+(p.mains&&p.mains.length?p.mains.join(', '):'*')+' ; heads: '+(p.heads&&p.heads.length?p.heads.join(', '):'*')+' ; seas: '+(p.seas&&p.seas.length?p.seas.join(', '):'*')+'\\n';});return s;}\n"
+"$('#btnCfgSave').onclick=async()=>{if(!CFG)return;$('#cfgmsg').textContent='…';\n"
+" const r=await fetch('/api/config',{method:'POST',body:genCfg()});const d=await r.json().catch(()=>({}));\n"
+" if(d.ok){$('#cfgmsg').textContent='✓';await loadCfg();await loadBoat();}else $('#cfgmsg').textContent='✗';};\n"
+"document.querySelectorAll('header nav button').forEach(b=>b.onclick=()=>{const v=b.dataset.v;$('#mdiag').style.display=v==='diag'?'':'none';$('#mdata').style.display=v==='data'?'':'none';$('#mvmg').style.display=v==='vmg'?'':'none';$('#mcfg').style.display=v==='cfg'?'':'none';document.querySelectorAll('header nav button').forEach(x=>x.classList.toggle('on',x===b));if(v==='data')renderTable();if(v==='vmg')renderVmg();if(v==='cfg')loadCfg();});\n"
 "$('#prt').onclick=()=>window.print();\n"
 "function renderVmg(){if(!P||!P.curves||!P.curves.length){$('#vmgtable').innerHTML='';return;}\n"
 " let h='<table class=dt><tr><th>TWS</th><th>'+T('vmgup')+' °</th><th>BS</th><th>VMG</th><th>'+T('vmgdn')+' °</th><th>BS</th><th>VMG</th></tr>';\n"
@@ -531,6 +568,67 @@ static void serve_newboat(int fd, const char *folder, const char *name)
     char cfg[700]; snprintf(cfg, sizeof cfg, "%s/boat.cfg", folder);
     if (!boat_config_save(&c, cfg) || !open_boat_dir(folder)) { send_text(fd, 500, "Error", "application/json", "{\"ok\":false}"); return; }
     send_text(fd, 200, "OK", "application/json", "{\"ok\":true}");
+}
+
+/* GET /api/config : la configuration bateau complète en JSON (pour l'éditeur). */
+static void serve_config_get(int fd)
+{
+    static char buf[16384]; size_t o = 0; int w;
+#define APP(...) do { w = snprintf(buf + o, sizeof buf - o, __VA_ARGS__); \
+    if (w < 0 || (size_t)w >= sizeof buf - o) { send_text(fd, 500, "Error", "application/json", "{}"); return; } \
+    o += (size_t)w; } while (0)
+#define ARR(field, count) do { APP("["); \
+    for (int i = 0; i < (count); i++) { json_escape((field)[i], e, sizeof e); APP("%s\"%s\"", i ? "," : "", e); } \
+    APP("]"); } while (0)
+    char e[BOAT_TERM_LEN * 2 + 8];
+    const BoatConfig *c = &g_boat_config;
+    json_escape(c->name, e, sizeof e); APP("{\"name\":\"%s\",\"mains\":", e);
+    ARR(c->mainsail, c->n_mainsail);
+    APP(",\"heads\":");  ARR(c->headsail, c->n_headsail);
+    APP(",\"seas\":");   ARR(c->seastate, c->n_seastate);
+    json_escape(c->kw_moteur, e, sizeof e); APP(",\"moteur\":\"%s\"", e);
+    json_escape(c->kw_charge, e, sizeof e); APP(",\"charge\":\"%s\",\"polars\":[", e);
+    for (int k = 0; k < c->n_polars; k++) {
+        const PolarDef *p = &c->polars[k];
+        json_escape(p->name, e, sizeof e);
+        APP("%s{\"name\":\"%s\",\"mains\":", k ? "," : "", e);
+        ARR(p->mains, p->n_mains);
+        APP(",\"heads\":"); ARR(p->heads, p->n_heads);
+        APP(",\"seas\":");  ARR(p->seas,  p->n_seas);
+        APP("}");
+    }
+    APP("]}");
+#undef ARR
+#undef APP
+    send_text(fd, 200, "OK", "application/json", buf);
+}
+
+/* POST /api/config : corps = texte INI du boat.cfg (généré par le formulaire).
+ * Écrit un .tmp, valide en le rechargeant, puis remplace et recharge la config. */
+static void serve_config_post(int fd, char *body)
+{
+    if (!g_boat_dir[0]) { send_text(fd, 400, "Bad Request", "application/json", "{\"ok\":false,\"err\":\"aucun bateau ouvert\"}"); return; }
+    char target[700];
+    if (g_boat_config_path[0]) snprintf(target, sizeof target, "%s", g_boat_config_path);
+    else snprintf(target, sizeof target, "%s/boat.cfg", g_boat_dir);
+    char tmp[720]; snprintf(tmp, sizeof tmp, "%s.tmp", target);
+
+    int fdw = open(tmp, O_WRONLY | O_CREAT | O_TRUNC, 0644);
+    if (fdw < 0) { send_text(fd, 500, "Error", "application/json", "{\"ok\":false}"); return; }
+    size_t len = strlen(body), w = 0;
+    while (w < len) { ssize_t x = write(fdw, body + w, len - w); if (x <= 0) break; w += (size_t)x; }
+    close(fdw);
+
+    BoatConfig test; boat_config_init(&test);
+    if (boat_config_load(&test, tmp) && test.name[0] && rename(tmp, target) == 0) {
+        g_boat_config = test;
+        snprintf(g_boat_config_path, BOAT_PATH_LEN, "%s", target);
+        snprintf(g_boat_name, sizeof g_boat_name, "%s", test.name);
+        send_text(fd, 200, "OK", "application/json", "{\"ok\":true}");
+    } else {
+        unlink(tmp);
+        send_text(fd, 400, "Bad Request", "application/json", "{\"ok\":false}");
+    }
 }
 
 /* GET /api/boat : nom du bateau + liste des polaires + index courant. */
@@ -976,6 +1074,7 @@ static void handle_client(int fd)
 
     if (strcmp(method, "POST") == 0) {
         if (strcmp(path, "/api/save") == 0 && body) serve_save(fd, body);
+        else if (strcmp(path, "/api/config") == 0 && body) serve_config_post(fd, body);
         else if (strncmp(path, "/api/import", 11) == 0 && body)
             serve_import(fd, body, strstr(path, "update") != NULL);
         else send_text(fd, 404, "Not Found", "text/plain", "404\n");
@@ -995,6 +1094,8 @@ static void handle_client(int fd)
         serve_boat(fd);
     else if (strcmp(path, "/api/boats") == 0)
         serve_boats(fd);
+    else if (strcmp(path, "/api/config") == 0)
+        serve_config_get(fd);
     else if (strncmp(path, "/api/open", 9) == 0) {
         const char *q = strstr(path, "folder=");
         char f[BOAT_PATH_LEN] = "";
