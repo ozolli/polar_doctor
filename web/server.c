@@ -94,7 +94,14 @@ static const char PAGE[] =
 "<aside>\n"
 "<div class='card'><h3 data-i18n='boat'>Bateau</h3>\n"
 "<div id='bname' style='font-size:.9em;margin-bottom:.3em'></div>\n"
-"<select id='polsel'></select></div>\n"
+"<select id='polsel'></select>\n"
+"<label style='margin-top:.4em'><span data-i18n='recent'>Récents</span> <select id='recsel'></select></label>\n"
+"<input id='bfolder' placeholder='/chemin/dossier' style='width:100%;margin-top:.3em;background:var(--inbg);color:var(--fg);border:1px solid var(--border);border-radius:4px;padding:.15em .3em'>\n"
+"<div style='margin-top:.3em;display:flex;gap:.3em;align-items:center'>"
+"<button class='hbtn' id='btnOpen' data-i18n='open1'>Ouvrir</button>"
+"<input id='bnewname' placeholder='Nom' style='width:6em;background:var(--inbg);color:var(--fg);border:1px solid var(--border);border-radius:4px;padding:.15em .3em'>"
+"<button class='hbtn' id='btnNew' data-i18n='new1'>Nouveau</button></div>\n"
+"<div id='bmsg' style='font-size:.8em;color:var(--muted);margin-top:.2em'></div></div>\n"
 "<div class='card'><h3 data-i18n='range'>Plage TWS</h3>\n"
 "<label><span data-i18n='from'>De</span> <select id='from'></select></label>\n"
 "<label><span data-i18n='to'>à</span> <select id='to'></select></label></div>\n"
@@ -128,8 +135,8 @@ static const char PAGE[] =
 "<script>\n"
 "let lang=localStorage.getItem('lang')||((navigator.language||'fr').toLowerCase().startsWith('fr')?'fr':'en');\n"
 "let theme=localStorage.getItem('theme')||((window.matchMedia&&matchMedia('(prefers-color-scheme: light)').matches)?'light':'dark');\n"
-"const L={fr:{boat:'Bateau',range:'Plage TWS',from:'De',to:'à',legend:'Légende (TWS)',kn:'nœuds',empty:'Aucune polaire chargée.',max:'Vitesse max',dyn:'Mode dynamique',dyn_on:'Activer',tws1:'TWS',live:'Live',source:'Source',start:'Démarrer',stop:'Arrêter',moteur:'Moteur',main1:'GV',head1:'Voile av.',sea1:'Mer',tabdiag:'Diagramme',tabdata:'Données',save1:'Enregistrer',addtwa:'+ TWA',addtws:'+ TWS',import:'Import fichiers',create1:'Créer',update1:'Mettre à jour',tabvmg:'VMG',vmgup:'Près',vmgdn:'Portant'},\n"
-"en:{boat:'Boat',range:'TWS range',from:'From',to:'to',legend:'Legend (TWS)',kn:'knots',empty:'No polar loaded.',max:'Max speed',dyn:'Dynamic mode',dyn_on:'Enable',tws1:'TWS',live:'Live',source:'Source',start:'Start',stop:'Stop',moteur:'Engine',main1:'Main',head1:'Headsail',sea1:'Sea',tabdiag:'Diagram',tabdata:'Data',save1:'Save',addtwa:'+ TWA',addtws:'+ TWS',import:'Import files',create1:'Create',update1:'Update',tabvmg:'VMG',vmgup:'Upwind',vmgdn:'Downwind'}};\n"
+"const L={fr:{boat:'Bateau',range:'Plage TWS',from:'De',to:'à',legend:'Légende (TWS)',kn:'nœuds',empty:'Aucune polaire chargée.',max:'Vitesse max',dyn:'Mode dynamique',dyn_on:'Activer',tws1:'TWS',live:'Live',source:'Source',start:'Démarrer',stop:'Arrêter',moteur:'Moteur',main1:'GV',head1:'Voile av.',sea1:'Mer',tabdiag:'Diagramme',tabdata:'Données',save1:'Enregistrer',addtwa:'+ TWA',addtws:'+ TWS',import:'Import fichiers',create1:'Créer',update1:'Mettre à jour',tabvmg:'VMG',vmgup:'Près',vmgdn:'Portant',recent:'Récents',open1:'Ouvrir',new1:'Nouveau'},\n"
+"en:{boat:'Boat',range:'TWS range',from:'From',to:'to',legend:'Legend (TWS)',kn:'knots',empty:'No polar loaded.',max:'Max speed',dyn:'Dynamic mode',dyn_on:'Enable',tws1:'TWS',live:'Live',source:'Source',start:'Start',stop:'Stop',moteur:'Engine',main1:'Main',head1:'Headsail',sea1:'Sea',tabdiag:'Diagram',tabdata:'Data',save1:'Save',addtwa:'+ TWA',addtws:'+ TWS',import:'Import files',create1:'Create',update1:'Update',tabvmg:'VMG',vmgup:'Upwind',vmgdn:'Downwind',recent:'Recent',open1:'Open',new1:'New'}};\n"
 "const T=k=>(L[lang]&&L[lang][k]!=null)?L[lang][k]:k;\n"
 "function i18n(){document.querySelectorAll('[data-i18n]').forEach(e=>e.textContent=T(e.dataset.i18n));document.documentElement.lang=lang;}\n"
 "const $=s=>document.querySelector(s);\n"
@@ -189,6 +196,17 @@ static const char PAGE[] =
 " const fillSel=(id,arr,cur)=>{$(id).innerHTML='<option value=\"\">—</option>'+(arr||[]).map(v=>'<option'+(v===cur?' selected':'')+'>'+v+'</option>').join('');};\n"
 " if(inv){fillSel('#lvmain',b.mains,b.cur_main);fillSel('#lvhead',b.heads,b.cur_head);fillSel('#lvsea',b.seas,b.cur_sea);}\n"
 " }catch(e){}}\n"
+"async function loadBoats(){try{const b=await fetch('/api/boats').then(r=>r.json());const rec=b.recent||[];\n"
+" $('#recsel').innerHTML='<option value=\"\">—</option>'+rec.map(p=>'<option value=\"'+p+'\"'+(p===b.current?' selected':'')+'>'+(p.split('/').filter(Boolean).pop()||p)+'</option>').join('');\n"
+" if(b.current)$('#bfolder').value=b.current;}catch(e){}}\n"
+"async function openBoat(f){if(!f)return;$('#bmsg').textContent='…';\n"
+" const r=await fetch('/api/open?folder='+encodeURIComponent(f));\n"
+" if(r.ok){$('#bmsg').textContent='';await loadBoats();await loadBoat();await load();renderTable();}else $('#bmsg').textContent='✗';}\n"
+"$('#recsel').onchange=e=>{if(e.target.value)openBoat(e.target.value);};\n"
+"$('#btnOpen').onclick=()=>openBoat($('#bfolder').value.trim());\n"
+"$('#btnNew').onclick=async()=>{const f=$('#bfolder').value.trim(),nm=$('#bnewname').value.trim();if(!f)return;$('#bmsg').textContent='…';\n"
+" const r=await fetch('/api/newboat?folder='+encodeURIComponent(f)+'&name='+encodeURIComponent(nm));const d=await r.json().catch(()=>({}));\n"
+" if(d.ok){$('#bmsg').textContent='✓';await loadBoats();await loadBoat();await load();renderTable();}else $('#bmsg').textContent='✗';};\n"
 "$('#polsel').onchange=async e=>{await fetch('/api/select?i='+e.target.value);await load();if($('#dyn').checked)loadDyn();if($('#lvbtn').dataset.on==='1')pollLive();};\n"
 "async function loadDyn(){const v=parseFloat($('#dtws').value)||0;try{const r=await fetch('/api/curve?tws='+v);DYN=await r.json();}catch(e){DYN=null;}CUR=null;draw();}\n"
 "$('#dyn').onchange=()=>{if($('#dyn').checked)loadDyn();else{DYN=null;CUR=null;draw();}};\n"
@@ -240,7 +258,7 @@ static const char PAGE[] =
 "function applyTheme(){document.body.classList.toggle('light',theme==='light');$('#theme').textContent=theme==='dark'?'☀':'🌙';}\n"
 "$('#lang').onclick=()=>{lang=lang==='fr'?'en':'fr';localStorage.setItem('lang',lang);$('#lang').textContent=lang==='fr'?'EN':'FR';i18n();load();};\n"
 "$('#theme').onclick=()=>{theme=theme==='dark'?'light':'dark';localStorage.setItem('theme',theme);applyTheme();draw();};\n"
-"applyTheme();$('#lang').textContent=lang==='fr'?'EN':'FR';i18n();loadBoat();load();\n"
+"applyTheme();$('#lang').textContent=lang==='fr'?'EN':'FR';i18n();loadBoats();loadBoat();load();\n"
 "pollLive().then(()=>{if(LIVE&&LIVE.on)startPoll();});\n"
 "</script></body></html>\n";
 
@@ -454,6 +472,65 @@ static void rescan_boat(void)
     g_npol = 0; scan_boat(g_boat_dir);
     g_cur = 0;
     for (int i = 0; i < g_npol; i++) if (strcmp(g_pol_names[i], cur) == 0) { g_cur = i; break; }
+}
+
+/* Ouvre un dossier-bateau : config + inventaire, liste des .pol, 1re polaire,
+ * et mémorise le bateau dans les récents. Réutilisé au démarrage et par /api/open. */
+static bool open_boat_dir(const char *folder)
+{
+    char dir[512]; snprintf(dir, sizeof dir, "%s", folder);
+    size_t L = strlen(dir); while (L > 1 && dir[L - 1] == '/') dir[--L] = '\0';
+    struct stat st;
+    if (stat(dir, &st) != 0 || !S_ISDIR(st.st_mode)) return false;
+
+    boat_config_init(&g_boat_config);           /* repart d'un inventaire propre */
+    const char *b = strrchr(dir, '/');
+    snprintf(g_boat_name, sizeof g_boat_name, "%s", b ? b + 1 : dir);
+
+    char cfg[BOAT_PATH_LEN];
+    if (boat_find_config(dir, cfg, sizeof cfg) && boat_config_load(&g_boat_config, cfg)) {
+        snprintf(g_boat_config_path, BOAT_PATH_LEN, "%s", cfg);
+        if (g_boat_config.name[0]) snprintf(g_boat_name, sizeof g_boat_name, "%s", g_boat_config.name);
+    } else g_boat_config_path[0] = '\0';
+
+    snprintf(g_boat_dir, sizeof g_boat_dir, "%s", dir);
+    g_npol = 0; g_cur = 0; g_loaded = 0;
+    scan_boat(dir);
+    if (g_npol > 0 && load_polar_file(g_pol_paths[0], &g_polar)) { g_loaded = 1; g_cur = 0; }
+    boat_recent_add(dir);
+    return true;
+}
+
+/* GET /api/boats : bateaux récents + dossier courant (pour le menu « Ouvrir »). */
+static void serve_boats(int fd)
+{
+    static char list[BOAT_RECENT_MAX][BOAT_PATH_LEN];
+    int n = boat_recent_load(list, BOAT_RECENT_MAX);
+    static char buf[8192]; size_t o = 0; int w;
+#define APP(...) do { w = snprintf(buf + o, sizeof buf - o, __VA_ARGS__); \
+    if (w < 0 || (size_t)w >= sizeof buf - o) { send_text(fd, 500, "Error", "application/json", "{}"); return; } \
+    o += (size_t)w; } while (0)
+    char e[BOAT_PATH_LEN * 2];
+    json_escape(g_boat_dir, e, sizeof e);
+    APP("{\"current\":\"%s\",\"recent\":[", e);
+    for (int i = 0; i < n; i++) { json_escape(list[i], e, sizeof e); APP("%s\"%s\"", i ? "," : "", e); }
+    APP("]}");
+#undef APP
+    send_text(fd, 200, "OK", "application/json", buf);
+}
+
+/* GET /api/newboat?folder=&name= : crée le dossier + boat.cfg, puis l'ouvre. */
+static void serve_newboat(int fd, const char *folder, const char *name)
+{
+    if (!folder[0]) { send_text(fd, 400, "Bad Request", "application/json", "{\"ok\":false}"); return; }
+    mkdir(folder, 0755);                         /* ignore EEXIST */
+    struct stat st;
+    if (stat(folder, &st) != 0 || !S_ISDIR(st.st_mode)) { send_text(fd, 400, "Bad Request", "application/json", "{\"ok\":false}"); return; }
+    BoatConfig c; boat_config_init(&c);
+    snprintf(c.name, sizeof c.name, "%s", name[0] ? name : "Bateau");
+    char cfg[700]; snprintf(cfg, sizeof cfg, "%s/boat.cfg", folder);
+    if (!boat_config_save(&c, cfg) || !open_boat_dir(folder)) { send_text(fd, 500, "Error", "application/json", "{\"ok\":false}"); return; }
+    send_text(fd, 200, "OK", "application/json", "{\"ok\":true}");
 }
 
 /* GET /api/boat : nom du bateau + liste des polaires + index courant. */
@@ -916,6 +993,22 @@ static void handle_client(int fd)
     }
     else if (strcmp(path, "/api/boat") == 0)
         serve_boat(fd);
+    else if (strcmp(path, "/api/boats") == 0)
+        serve_boats(fd);
+    else if (strncmp(path, "/api/open", 9) == 0) {
+        const char *q = strstr(path, "folder=");
+        char f[BOAT_PATH_LEN] = "";
+        if (q) url_decode(q + 7, f, sizeof f);
+        if (f[0] && open_boat_dir(f)) serve_boat(fd);
+        else send_text(fd, 400, "Bad Request", "application/json", "{\"ok\":false}");
+    }
+    else if (strncmp(path, "/api/newboat", 12) == 0) {
+        const char *qf = strstr(path, "folder="), *qn = strstr(path, "name=");
+        char f[BOAT_PATH_LEN] = "", nm[128] = "";
+        if (qf) url_decode(qf + 7, f, sizeof f);
+        if (qn) url_decode(qn + 5, nm, sizeof nm);
+        serve_newboat(fd, f, nm);
+    }
     else if (strncmp(path, "/api/select", 11) == 0) {
         const char *q = strstr(path, "i=");
         serve_select(fd, q ? atoi(q + 2) : -1);
@@ -971,17 +1064,9 @@ int main(int argc, char **argv)
     init_polar_data(&g_polar);
     struct stat st;
     if (pol && stat(pol, &st) == 0 && S_ISDIR(st.st_mode)) {
-        /* dossier-bateau : lister les .pol, charger le premier */
-        char dir[512]; snprintf(dir, sizeof dir, "%s", pol);
-        size_t L = strlen(dir); while (L > 1 && dir[L - 1] == '/') dir[--L] = '\0';
-        const char *b = strrchr(dir, '/'); snprintf(g_boat_name, sizeof g_boat_name, "%s", b ? b + 1 : dir);
-        char cfg[BOAT_PATH_LEN];                 /* nom réel depuis boat.cfg si présent */
-        if (boat_find_config(dir, cfg, sizeof cfg) && boat_config_load(&g_boat_config, cfg) && g_boat_config.name[0])
-            snprintf(g_boat_name, sizeof g_boat_name, "%s", g_boat_config.name);
-        snprintf(g_boat_dir, sizeof g_boat_dir, "%s", dir);
-        scan_boat(dir);
-        if (g_npol > 0 && load_polar_file(g_pol_paths[0], &g_polar)) { g_loaded = 1; g_cur = 0; }
-        else fprintf(stderr, "polar_doctor_web : aucune polaire chargeable dans %s\n", dir);
+        /* dossier-bateau : config + inventaire + liste des .pol (cf. open_boat_dir) */
+        if (!open_boat_dir(pol) || g_npol == 0)
+            fprintf(stderr, "polar_doctor_web : aucune polaire chargeable dans %s\n", pol);
     } else if (pol) {
         if (load_polar_file(pol, &g_polar)) g_loaded = 1;
         else fprintf(stderr, "polar_doctor_web : impossible de charger %s\n", pol);
