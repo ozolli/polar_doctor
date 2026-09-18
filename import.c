@@ -112,6 +112,7 @@ static double wind_to_knots(double v, char unit) {
 
 // TWA = direction vraie du vent − cap, ramené à [0,180]. Mis à jour dès qu'on a les deux.
 static void nmea_update_twa(nmea_data_t *d) {
+    if (d->has_mwv_true) return;   // vent eau (MWV,T) prioritaire : polaire = STW vs vent sur l'eau
     if (!d->has_twd || !d->has_heading) return;
     double rel = d->twd - d->heading;
     while (rel > 180.0) rel -= 360.0;
@@ -154,9 +155,12 @@ bool parse_nmea_sentence(const char *sentence, nmea_data_t *data) {
         if (nf > 4 && nmea_field_num(fields, nf, 1, &angle) &&
             nmea_field_num(fields, nf, 3, &speed) &&
             fields[2][0] == 'T' && speed > 0.1) {
-            data->twa = fabs(angle);
+            double a = fmod(angle, 360.0);          // MWV : 0-360° depuis l'étrave, sens horaire
+            if (a < 0) a += 360.0;
+            data->twa = (a > 180.0) ? 360.0 - a : a; // -> TWA 0-180 (le bord bâbord est replié)
             data->tws = wind_to_knots(speed, fields[4][0]);
             data->has_twa = true;
+            data->has_mwv_true = true;
             data->has_tws = true;
             if (LIVE_COMPLETE()) return true;
         }
@@ -166,10 +170,12 @@ bool parse_nmea_sentence(const char *sentence, nmea_data_t *data) {
         if (nf > 2 && nmea_field_num(fields, nf, 1, &dir) && fields[2][0] == 'T') {
             data->twd = dir;
             data->has_twd = true;
-            if (nmea_field_num(fields, nf, 5, &speed) && speed > 0.1) {
-                data->tws = speed; data->has_tws = true;                      // nœuds
-            } else if (nmea_field_num(fields, nf, 7, &speed) && speed > 0.1) {
-                data->tws = wind_to_knots(speed, 'M'); data->has_tws = true;  // m/s
+            if (!data->has_mwv_true) {             // vent eau (MWV,T) prioritaire : ne pas l'écraser
+                if (nmea_field_num(fields, nf, 5, &speed) && speed > 0.1) {
+                    data->tws = speed; data->has_tws = true;                      // nœuds
+                } else if (nmea_field_num(fields, nf, 7, &speed) && speed > 0.1) {
+                    data->tws = wind_to_knots(speed, 'M'); data->has_tws = true;  // m/s
+                }
             }
             nmea_update_twa(data);             // TWA = TWD - cap (si cap connu)
             if (LIVE_COMPLETE()) return true;

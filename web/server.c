@@ -860,6 +860,7 @@ static void live_reset(void)
 static void live_add(double twa, double tws, double bsp)
 {
     if (g_live_moteur) return;
+    if (twa < 0 || twa > 180 || tws < 0 || tws > 70 || bsp < 0 || bsp > 50) return;  /* = filtre add_data_point */
     int disp_hit = 0;
     if (g_routing) {
         for (int k = 0; k < g_ng; k++)

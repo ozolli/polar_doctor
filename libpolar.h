@@ -98,6 +98,7 @@ typedef struct {
     bool has_twd;
     double heading;   // cap vrai (HDT/HDG/VHW)
     bool has_heading;
+    bool has_mwv_true;   // MWV,T (vent vrai rapporté à l'eau) reçu : prioritaire sur MWD (fond)
 } nmea_data_t;
 
 typedef struct {
