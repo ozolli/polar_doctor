@@ -13,21 +13,119 @@
  * Usage : polar_doctor_web [fichier.pol] [--port N] [--bind ADDR] [--auth user:pass]
  */
 
+/* Windows : winsock2.h doit précéder windows.h, tiré par libpolar.h. */
+#ifdef _WIN32
+#  ifndef _WIN32_WINNT
+#    define _WIN32_WINNT 0x0601          /* Windows 7+ : WSAPoll, inet_pton */
+#  endif
+#  include <winsock2.h>
+#  include <ws2tcpip.h>
+#endif
 #include "libpolar.h"
 
 #include <errno.h>
 #include <unistd.h>
 #include <signal.h>
 #include <fcntl.h>
-#include <dirent.h>
-#include <strings.h>
-#include <poll.h>
-#include <netdb.h>
 #include <time.h>
 #include <sys/stat.h>
-#include <sys/socket.h>
-#include <netinet/in.h>
-#include <arpa/inet.h>
+#ifdef _WIN32
+#  include <bcrypt.h>
+#  define poll WSAPoll                   /* même struct pollfd / POLLIN / POLLHUP */
+#  define sock_close closesocket
+#else
+#  include <poll.h>
+#  include <netdb.h>
+#  include <sys/socket.h>
+#  include <netinet/in.h>
+#  include <arpa/inet.h>
+#  define sock_close close
+#endif
+#ifndef O_BINARY
+#  define O_BINARY 0                     /* Windows : écrire les octets tels quels */
+#endif
+
+/* ------------------------------------------------ portabilité POSIX / Windows ---
+ * Les sockets sont manipulées en int : sous Windows, SOCKET est un handle noyau
+ * de petite valeur (INVALID_SOCKET converti en int vaut -1, donc « fd < 0 » reste
+ * valable). Les fichiers passent par GLib (g_open, g_fopen, g_unlink, g_mkdir,
+ * GDir, g_file_test) : chemins UTF-8, y compris accentués, sous Windows. */
+#ifdef _WIN32
+static char *strcasestr(const char *h, const char *n)       /* absent de MinGW */
+{
+    size_t l = strlen(n);
+    for (; *h; h++) if (g_ascii_strncasecmp(h, n, l) == 0) return (char *)h;
+    return l ? NULL : (char *)h;
+}
+#endif
+
+/* Écriture sur une socket (write() n'agit pas sur une socket Winsock). */
+static void sock_write(int fd, const void *buf, size_t len)
+{
+    int w = (int)send(fd, (const char *)buf, (int)len, 0); (void)w;
+}
+
+static void sock_timeouts(int fd, int sec)
+{
+#ifdef _WIN32
+    DWORD ms = (DWORD)sec * 1000;                           /* Winsock : DWORD en ms */
+    setsockopt(fd, SOL_SOCKET, SO_RCVTIMEO, (const char *)&ms, sizeof ms);
+    setsockopt(fd, SOL_SOCKET, SO_SNDTIMEO, (const char *)&ms, sizeof ms);
+#else
+    struct timeval tv = { .tv_sec = sec, .tv_usec = 0 };
+    setsockopt(fd, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof tv);
+    setsockopt(fd, SOL_SOCKET, SO_SNDTIMEO, &tv, sizeof tv);
+#endif
+}
+
+/* Remplacement atomique d'un fichier : sous Windows, rename() ÉCHOUE si la cible
+ * existe, ce qui casserait l'enregistrement « .tmp puis remplace ». */
+static int replace_file(const char *from, const char *to)
+{
+#ifdef _WIN32
+    gunichar2 *wf = g_utf8_to_utf16(from, -1, NULL, NULL, NULL);
+    gunichar2 *wt = g_utf8_to_utf16(to, -1, NULL, NULL, NULL);
+    int ok = wf && wt && MoveFileExW((LPCWSTR)wf, (LPCWSTR)wt, MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH);
+    g_free(wf); g_free(wt);
+    return ok ? 0 : -1;
+#else
+    return rename(from, to);
+#endif
+}
+
+static void local_tm(time_t t, struct tm *out)
+{
+#ifdef _WIN32
+    localtime_s(out, &t);
+#else
+    localtime_r(&t, out);
+#endif
+}
+
+/* Octets aléatoires cryptographiques (secret de session). */
+static bool rand_bytes(unsigned char *b, size_t n)
+{
+#ifdef _WIN32
+    return BCryptGenRandom(NULL, b, (ULONG)n, BCRYPT_USE_SYSTEM_PREFERRED_RNG) >= 0;
+#else
+    int fd = open("/dev/urandom", O_RDONLY);
+    if (fd < 0) return false;
+    ssize_t r = read(fd, b, n);
+    close(fd);
+    return r == (ssize_t)n;
+#endif
+}
+
+/* Dernier séparateur de chemin : '/' partout, '\\' aussi sous Windows. */
+static char *last_sep(const char *p)
+{
+    char *sep = strrchr(p, '/');
+#ifdef _WIN32
+    char *bs = strrchr(p, '\\');
+    if (!sep || (bs && bs > sep)) sep = bs;
+#endif
+    return sep;
+}
 
 #define REQ_MAX   131072   /* en-têtes + corps POST (.pol édité) */
 #define JSON_MAX  262144   /* polaire en JSON (worst case ~110 Ko) */
@@ -138,7 +236,7 @@ static const char PAGE[] =
 "<div style='margin:.2em 0 .8em;padding:.5em;border:1px solid var(--border);border-radius:6px'>\n"
 "<b data-i18n='import'>Import fichiers</b><br>\n"
 "<textarea id='imppaths' rows='2' placeholder='/chemin/nav.nmea (un par ligne)' style='width:100%;background:var(--inbg);color:var(--fg);border:1px solid var(--border);border-radius:4px'></textarea>\n"
-"<button class='hbtn' id='btnCreate' data-i18n='create1'>Créer</button> <button class='hbtn' id='btnUpdate' data-i18n='update1'>Mettre à jour</button> <span id='impmsg' style='font-size:.85em;color:var(--muted)'></span></div>\n"
+"<button class='hbtn' id='btnCreate' data-i18n='create1'>Créer</button> <button class='hbtn' id='btnUpdate' data-i18n='update1'>Mettre à jour</button> <label class=sl data-i18n-title='pcthint' style='margin-left:.6em'>Percentile <select id='pctsel'></select></label> <span id='impmsg' style='font-size:.85em;color:var(--muted)'></span></div>\n"
 "<div id='dtable' style='overflow:auto'></div></div>\n"
 "<div id='mvmg' style='display:none;padding:1em'><div id='vmgtable' style='overflow:auto'></div></div>\n"
 "<div id='mcfg' style='display:none;padding:1em;max-width:900px'>\n"
@@ -265,6 +363,9 @@ static const char PAGE[] =
 " const r=await fetch('/api/import?mode='+(upd?'update':'create'),{method:'POST',body:paths});const d=await r.json().catch(()=>({}));\n"
 " if(d.ok){$('#impmsg').textContent='✓ '+d.files+' fich., '+d.points+' pts → '+(d.saved.split('/').pop());await loadBoat();await load();renderTable();}else $('#impmsg').textContent='✗';}\n"
 "$('#btnCreate').onclick=()=>doImport(false);$('#btnUpdate').onclick=()=>doImport(true);\n"
+"$('#pctsel').innerHTML=[85,86,87,88,89,90,91,92,93,94,95].map(p=>'<option value='+p+'>P'+p+'</option>').join('');\n"
+"fetch('/api/percentile').then(r=>r.json()).then(d=>{$('#pctsel').value=d.p;}).catch(()=>{});\n"
+"$('#pctsel').onchange=e=>fetch('/api/percentile?p='+e.target.value);\n"
 "let CFG=null;\n"
 "const esc=s=>String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/\"/g,'&quot;');\n"
 "async function loadCfg(){try{CFG=await fetch('/api/config').then(r=>r.json());}catch(e){CFG=null;}renderCfg();}\n"
@@ -336,7 +437,7 @@ static const char PAGE[] =
 "<h3>Comment c'est calculé</h3>\n"
 "<ul>\n"
 "<li>les points sont groupés par cases de 5° (TWA) et 2 nœuds (TWS), minimum 3 points par case</li>\n"
-"<li>on retient un <b>percentile élevé</b> (P90) : la performance <i>atteignable</i>, pas la moyenne</li>\n"
+"<li>on retient un <b>percentile élevé</b> (P90 par défaut, réglable de P85 à P95 dans l’onglet <b>Données</b>) : la performance <i>atteignable</i>, pas la moyenne</li>\n"
 "<li>le STW est lissé puis débruité par comparaison au SOG (les sauts du loch sont rejetés)</li>\n"
 "<li>les points sous moteur sont exclus</li>\n"
 "</ul>\n"
@@ -387,7 +488,7 @@ static const char PAGE[] =
 "<h3>How it is computed</h3>\n"
 "<ul>\n"
 "<li>points are grouped into 5° (TWA) and 2 kn (TWS) buckets, minimum 3 points per bucket</li>\n"
-"<li>a <b>high percentile</b> is kept (P90): <i>achievable</i> performance, not the average</li>\n"
+"<li>a <b>high percentile</b> is kept (P90 by default, adjustable P85–P95 in the <b>Data</b> tab): <i>achievable</i> performance, not the average</li>\n"
 "<li>STW is smoothed then denoised against SOG (log spikes are rejected)</li>\n"
 "<li>points under engine are excluded</li>\n"
 "</ul>\n"
@@ -494,8 +595,8 @@ static void send_resp(int fd, int code, const char *status, const char *ctype,
         "HTTP/1.1 %d %s\r\nContent-Type: %s\r\nContent-Length: %zu\r\n"
         "Cache-Control: no-store\r\nConnection: close\r\n\r\n",
         code, status, ctype, len);
-    if (h > 0) { ssize_t w = write(fd, hdr, (size_t)h); (void)w; }
-    if (body && len) { ssize_t w = write(fd, body, len); (void)w; }
+    if (h > 0) sock_write(fd, hdr, (size_t)h);
+    if (body && len) sock_write(fd, body, len);
 }
 
 static void send_text(int fd, int code, const char *status, const char *ctype, const char *body)
@@ -637,28 +738,28 @@ static void serve_polar(int fd)
 /* --- Bateau : liste des .pol d'un dossier --- */
 static void base_no_ext(const char *path, char *out, size_t cap)
 {
-    const char *b = strrchr(path, '/'); b = b ? b + 1 : path;
+    const char *b = last_sep(path); b = b ? b + 1 : path;
     snprintf(out, cap, "%s", b);
     char *dot = strrchr(out, '.');
-    if (dot && strcasecmp(dot, ".pol") == 0) *dot = '\0';
+    if (dot && g_ascii_strcasecmp(dot, ".pol") == 0) *dot = '\0';
 }
 
 static void scan_boat(const char *dir)
 {
-    DIR *d = opendir(dir);
+    GDir *d = g_dir_open(dir, 0, NULL);
     if (!d) return;
-    struct dirent *e;
-    while ((e = readdir(d)) && g_npol < MAXPOL) {
-        size_t l = strlen(e->d_name);
-        if (l < 4 || strcasecmp(e->d_name + l - 4, ".pol") != 0) continue;
-        snprintf(g_pol_paths[g_npol], sizeof g_pol_paths[0], "%s/%s", dir, e->d_name);
-        base_no_ext(e->d_name, g_pol_names[g_npol], sizeof g_pol_names[0]);
+    const gchar *nm;
+    while ((nm = g_dir_read_name(d)) && g_npol < MAXPOL) {
+        size_t l = strlen(nm);
+        if (l < 4 || g_ascii_strcasecmp(nm + l - 4, ".pol") != 0) continue;
+        snprintf(g_pol_paths[g_npol], sizeof g_pol_paths[0], "%s/%s", dir, nm);
+        base_no_ext(nm, g_pol_names[g_npol], sizeof g_pol_names[0]);
         g_npol++;
     }
-    closedir(d);
+    g_dir_close(d);
     for (int i = 0; i < g_npol - 1; i++)            /* tri alphabétique */
         for (int j = i + 1; j < g_npol; j++)
-            if (strcasecmp(g_pol_names[i], g_pol_names[j]) > 0) {
+            if (g_ascii_strcasecmp(g_pol_names[i], g_pol_names[j]) > 0) {
                 char tp[512], tn[128];
                 snprintf(tp, sizeof tp, "%s", g_pol_paths[i]); snprintf(tn, sizeof tn, "%s", g_pol_names[i]);
                 snprintf(g_pol_paths[i], 512, "%s", g_pol_paths[j]); snprintf(g_pol_names[i], 128, "%s", g_pol_names[j]);
@@ -682,12 +783,11 @@ static void rescan_boat(void)
 static bool open_boat_dir(const char *folder)
 {
     char dir[512]; snprintf(dir, sizeof dir, "%s", folder);
-    size_t L = strlen(dir); while (L > 1 && dir[L - 1] == '/') dir[--L] = '\0';
-    struct stat st;
-    if (stat(dir, &st) != 0 || !S_ISDIR(st.st_mode)) return false;
+    size_t L = strlen(dir); while (L > 1 && (dir[L - 1] == '/' || dir[L - 1] == '\\')) dir[--L] = '\0';
+    if (!g_file_test(dir, G_FILE_TEST_IS_DIR)) return false;
 
     boat_config_init(&g_boat_config);           /* repart d'un inventaire propre */
-    const char *b = strrchr(dir, '/');
+    const char *b = last_sep(dir);
     snprintf(g_boat_name, sizeof g_boat_name, "%s", b ? b + 1 : dir);
 
     char cfg[BOAT_PATH_LEN];
@@ -726,9 +826,8 @@ static void serve_boats(int fd)
 static void serve_newboat(int fd, const char *folder, const char *name)
 {
     if (!folder[0]) { send_text(fd, 400, "Bad Request", "application/json", "{\"ok\":false}"); return; }
-    mkdir(folder, 0755);                         /* ignore EEXIST */
-    struct stat st;
-    if (stat(folder, &st) != 0 || !S_ISDIR(st.st_mode)) { send_text(fd, 400, "Bad Request", "application/json", "{\"ok\":false}"); return; }
+    g_mkdir(folder, 0755);                       /* ignore EEXIST */
+    if (!g_file_test(folder, G_FILE_TEST_IS_DIR)) { send_text(fd, 400, "Bad Request", "application/json", "{\"ok\":false}"); return; }
     BoatConfig c; boat_config_init(&c);
     snprintf(c.name, sizeof c.name, "%s", name[0] ? name : "Bateau");
     char cfg[700]; snprintf(cfg, sizeof cfg, "%s/boat.cfg", folder);
@@ -779,20 +878,20 @@ static void serve_config_post(int fd, char *body)
     else snprintf(target, sizeof target, "%s/boat.cfg", g_boat_dir);
     char tmp[720]; snprintf(tmp, sizeof tmp, "%s.tmp", target);
 
-    int fdw = open(tmp, O_WRONLY | O_CREAT | O_TRUNC, 0644);
+    int fdw = g_open(tmp, O_WRONLY | O_CREAT | O_TRUNC | O_BINARY, 0644);
     if (fdw < 0) { send_text(fd, 500, "Error", "application/json", "{\"ok\":false}"); return; }
     size_t len = strlen(body), w = 0;
     while (w < len) { ssize_t x = write(fdw, body + w, len - w); if (x <= 0) break; w += (size_t)x; }
     close(fdw);
 
     BoatConfig test; boat_config_init(&test);
-    if (boat_config_load(&test, tmp) && test.name[0] && rename(tmp, target) == 0) {
+    if (boat_config_load(&test, tmp) && test.name[0] && replace_file(tmp, target) == 0) {
         g_boat_config = test;
         snprintf(g_boat_config_path, BOAT_PATH_LEN, "%s", target);
         snprintf(g_boat_name, sizeof g_boat_name, "%s", test.name);
         send_text(fd, 200, "OK", "application/json", "{\"ok\":true}");
     } else {
-        unlink(tmp);
+        g_unlink(tmp);
         send_text(fd, 400, "Bad Request", "application/json", "{\"ok\":false}");
     }
 }
@@ -1001,8 +1100,8 @@ static int open_tcp(const char *addr)
     struct addrinfo hints = {0}, *res = NULL;
     hints.ai_family = AF_INET; hints.ai_socktype = SOCK_STREAM;
     if (getaddrinfo(host, port, &hints, &res) != 0 || !res) return -1;
-    int fd = socket(res->ai_family, res->ai_socktype, 0);
-    if (fd >= 0 && connect(fd, res->ai_addr, res->ai_addrlen) != 0) { close(fd); fd = -1; }
+    int fd = (int)socket(res->ai_family, res->ai_socktype, 0);
+    if (fd >= 0 && connect(fd, res->ai_addr, (socklen_t)res->ai_addrlen) != 0) { sock_close(fd); fd = -1; }
     freeaddrinfo(res);
     return fd;
 }
@@ -1011,20 +1110,20 @@ static int open_udp(const char *addr)
 {
     const char *c = strrchr(addr, ':');
     int port = atoi(c ? c + 1 : addr);
-    int fd = socket(AF_INET, SOCK_DGRAM, 0);
+    int fd = (int)socket(AF_INET, SOCK_DGRAM, 0);
     if (fd < 0) return -1;
     int one = 1;
-    setsockopt(fd, SOL_SOCKET, SO_REUSEADDR, &one, sizeof one);
-    setsockopt(fd, SOL_SOCKET, SO_BROADCAST, &one, sizeof one);
+    setsockopt(fd, SOL_SOCKET, SO_REUSEADDR, (const char *)&one, sizeof one);
+    setsockopt(fd, SOL_SOCKET, SO_BROADCAST, (const char *)&one, sizeof one);
     struct sockaddr_in a = {0};
     a.sin_family = AF_INET; a.sin_addr.s_addr = INADDR_ANY; a.sin_port = htons((uint16_t)port);
-    if (bind(fd, (struct sockaddr *)&a, sizeof a) != 0) { close(fd); return -1; }
+    if (bind(fd, (struct sockaddr *)&a, sizeof a) != 0) { sock_close(fd); return -1; }
     return fd;
 }
 
 static void live_stop(void)
 {
-    if (g_live_fd >= 0) close(g_live_fd);
+    if (g_live_fd >= 0) sock_close(g_live_fd);
     g_live_fd = -1;
     if (g_vdr) { sqlite3_close(g_vdr); g_vdr = NULL; }
     g_live_on = 0;
@@ -1085,9 +1184,9 @@ static void live_save(void)
         if (g_npol > 0) {
             int i = (g_cur >= 0 && g_cur < g_npol) ? g_cur : 0;
             snprintf(dir, sizeof dir, "%s", g_pol_paths[i]);
-            char *sl = strrchr(dir, '/'); if (sl) *sl = 0; else snprintf(dir, sizeof dir, ".");
+            char *sl = last_sep(dir); if (sl) *sl = 0; else snprintf(dir, sizeof dir, ".");
         }
-        time_t t = time(NULL); struct tm tmv; localtime_r(&t, &tmv);
+        time_t t = time(NULL); struct tm tmv; local_tm(t, &tmv);
         char ts[32]; strftime(ts, sizeof ts, "%Y%m%d_%H%M%S", &tmv);
         char path[700]; snprintf(path, sizeof path, "%s/live_%s.pol", dir, ts);
         if (save_polar_file(path, &lp)) snprintf(g_live_saved, sizeof g_live_saved, "%s", path);
@@ -1131,7 +1230,7 @@ static void serve_save(int fd, char *body)
 {
     if (g_npol <= 0 || g_cur < 0 || g_cur >= g_npol) { send_text(fd, 400, "Bad Request", "application/json", "{\"ok\":false}"); return; }
     char tmp[700]; snprintf(tmp, sizeof tmp, "%s.tmp", g_pol_paths[g_cur]);
-    int fdw = open(tmp, O_WRONLY | O_CREAT | O_TRUNC, 0644);
+    int fdw = g_open(tmp, O_WRONLY | O_CREAT | O_TRUNC | O_BINARY, 0644);
     if (fdw < 0) { send_text(fd, 500, "Error", "application/json", "{\"ok\":false}"); return; }
     size_t len = strlen(body), w = 0;
     while (w < len) { ssize_t x = write(fdw, body + w, len - w); if (x <= 0) break; w += (size_t)x; }
@@ -1140,13 +1239,13 @@ static void serve_save(int fd, char *body)
     /* load_polar_file est laxiste : on exige une polaire non dégénérée (>=1 TWA,
      * >=2 colonnes TWS dont la sentinelle 0) avant de remplacer le fichier. */
     if (load_polar_file(tmp, &test) && test.num_angles >= 1 && test.num_speeds >= 2
-        && rename(tmp, g_pol_paths[g_cur]) == 0) {
+        && replace_file(tmp, g_pol_paths[g_cur]) == 0) {
         g_polar = test;
         snprintf(g_polar.filename, sizeof g_polar.filename, "%s", g_pol_paths[g_cur]);
         g_loaded = 1;
         send_text(fd, 200, "OK", "application/json", "{\"ok\":true}");
     } else {
-        unlink(tmp);
+        g_unlink(tmp);
         send_text(fd, 400, "Bad Request", "application/json", "{\"ok\":false}");
     }
 }
@@ -1180,8 +1279,8 @@ static void serve_import(int fd, char *body, int update)
     } else {
         char dir[512] = ".";
         if (g_boat_dir[0]) snprintf(dir, sizeof dir, "%s", g_boat_dir);
-        else if (g_npol > 0) { snprintf(dir, sizeof dir, "%s", g_pol_paths[0]); char *s = strrchr(dir, '/'); if (s) *s = 0; else snprintf(dir, sizeof dir, "."); }
-        time_t t = time(NULL); struct tm tmv; localtime_r(&t, &tmv);
+        else if (g_npol > 0) { snprintf(dir, sizeof dir, "%s", g_pol_paths[0]); char *s = last_sep(dir); if (s) *s = 0; else snprintf(dir, sizeof dir, "."); }
+        time_t t = time(NULL); struct tm tmv; local_tm(t, &tmv);
         char ts[32]; strftime(ts, sizeof ts, "%Y%m%d_%H%M%S", &tmv);
         snprintf(path, sizeof path, "%s/import_%s.pol", dir, ts);
     }
@@ -1209,7 +1308,7 @@ static void send_redirect(int fd, const char *loc, const char *cookie)
         "HTTP/1.1 303 See Other\r\nLocation: %s\r\n%s%s%s"
         "Content-Length: 0\r\nCache-Control: no-store\r\nConnection: close\r\n\r\n",
         loc, cookie ? "Set-Cookie: " : "", cookie ? cookie : "", cookie ? "\r\n" : "");
-    if (n > 0) { ssize_t w = write(fd, h, (size_t)n); (void)w; }
+    if (n > 0) sock_write(fd, h, (size_t)n);
 }
 
 /* POST /login (formulaire user/pass). Anti-force-brute NON bloquant : après 5
@@ -1247,16 +1346,14 @@ static bool init_session_token(void)
     char secret[65] = "";
     char *dir = g_build_filename(g_get_user_config_dir(), "polar_doctor", NULL);
     char *path = g_build_filename(dir, "web_secret", NULL);
-    FILE *f = fopen(path, "r");
+    FILE *f = g_fopen(path, "r");
     if (f) { if (!fgets(secret, sizeof secret, f)) secret[0] = 0; fclose(f); secret[strcspn(secret, "\r\n")] = 0; }
     if (strlen(secret) < 64) {
-        unsigned char rnd[32]; int ok = 0;
-        int ufd = open("/dev/urandom", O_RDONLY);
-        if (ufd >= 0) { ok = (read(ufd, rnd, sizeof rnd) == (ssize_t)sizeof rnd); close(ufd); }
-        if (!ok) { fprintf(stderr, "polar_doctor_web : /dev/urandom illisible\n"); g_free(path); g_free(dir); return false; }
+        unsigned char rnd[32];
+        if (!rand_bytes(rnd, sizeof rnd)) { fprintf(stderr, "polar_doctor_web : générateur aléatoire indisponible\n"); g_free(path); g_free(dir); return false; }
         for (int i = 0; i < 32; i++) snprintf(secret + 2 * i, 3, "%02x", rnd[i]);
         g_mkdir_with_parents(dir, 0700);
-        int wfd = open(path, O_WRONLY | O_CREAT | O_TRUNC, 0600);
+        int wfd = g_open(path, O_WRONLY | O_CREAT | O_TRUNC | O_BINARY, 0600);
         if (wfd >= 0) { ssize_t w = write(wfd, secret, 64); (void)w; close(wfd); }
         else fprintf(stderr, "polar_doctor_web : secret non enregistré (%s) : reconnexion à chaque redémarrage\n", path);
     }
@@ -1338,6 +1435,12 @@ static void handle_client(int fd)
         serve_boat(fd);
     else if (strcmp(path, "/api/boats") == 0)
         serve_boats(fd);
+    else if (strncmp(path, "/api/percentile", 15) == 0) {   /* ?p=85..95 : règle, sinon lit */
+        const char *q = strstr(path, "p=");
+        if (q) { int p = atoi(q + 2); if (p >= 85 && p <= 95) g_polar_percentile = p; }
+        char o[32]; snprintf(o, sizeof o, "{\"p\":%d}", g_polar_percentile);
+        send_text(fd, 200, "OK", "application/json", o);
+    }
     else if (strcmp(path, "/api/config") == 0)
         serve_config_get(fd);
     else if (strncmp(path, "/api/open", 9) == 0) {
@@ -1452,8 +1555,7 @@ int main(int argc, char **argv)
     }
 
     init_polar_data(&g_polar);
-    struct stat st;
-    if (pol && stat(pol, &st) == 0 && S_ISDIR(st.st_mode)) {
+    if (pol && g_file_test(pol, G_FILE_TEST_IS_DIR)) {
         /* dossier-bateau : config + inventaire + liste des .pol (cf. open_boat_dir) */
         if (!open_boat_dir(pol) || g_npol == 0)
             fprintf(stderr, "polar_doctor_web : aucune polaire chargeable dans %s\n", pol);
@@ -1465,12 +1567,21 @@ int main(int argc, char **argv)
         g_npol = 1; g_cur = 0;
     }
 
+#ifdef _WIN32
+    WSADATA wsa;
+    if (WSAStartup(MAKEWORD(2, 2), &wsa) != 0) { fprintf(stderr, "polar_doctor_web : WSAStartup a échoué\n"); return 1; }
+#else
     signal(SIGPIPE, SIG_IGN);
+#endif
 
-    int ls = socket(AF_INET, SOCK_STREAM, 0);
+    int ls = (int)socket(AF_INET, SOCK_STREAM, 0);
     if (ls < 0) { perror("socket"); return 1; }
     int one = 1;
+#ifndef _WIN32   /* sous Windows, SO_REUSEADDR permettrait à un autre processus de voler le port */
     setsockopt(ls, SOL_SOCKET, SO_REUSEADDR, &one, sizeof one);
+#else
+    (void)one;
+#endif
     struct sockaddr_in a = {0};
     a.sin_family = AF_INET;
     a.sin_port = htons((uint16_t)port);
@@ -1490,13 +1601,11 @@ int main(int argc, char **argv)
         int r = poll(pfds, nf, g_live_on ? 1000 : -1);
         if (r < 0) { if (errno == EINTR) continue; break; }
         if (pfds[0].revents & POLLIN) {
-            int fd = accept(ls, NULL, NULL);
+            int fd = (int)accept(ls, NULL, NULL);
             if (fd >= 0) {
-                struct timeval tv = { .tv_sec = 5, .tv_usec = 0 };
-                setsockopt(fd, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof tv);
-                setsockopt(fd, SOL_SOCKET, SO_SNDTIMEO, &tv, sizeof tv);
+                sock_timeouts(fd, 5);
                 handle_client(fd);
-                close(fd);
+                sock_close(fd);
             }
         }
         if (g_live_on && g_live_fd >= 0 && nf > 1 && (pfds[1].revents & (POLLIN | POLLHUP))) {
@@ -1507,6 +1616,6 @@ int main(int argc, char **argv)
         }
         if (g_live_on && g_live_src == 3) live_vdr_tick();      /* tail VDR (~1/s) */
     }
-    close(ls);
+    sock_close(ls);
     return 0;
 }

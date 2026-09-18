@@ -2,6 +2,42 @@
 
 Toutes les modifications notables du projet seront documentées dans ce fichier.
 
+## [2.0.0] - 2026-09-18
+
+Polar Doctor devient une **application web**. L'interface GTK est retirée : un serveur
+(`polar_doctor_web`) tourne sur l'ordinateur de bord et s'utilise depuis n'importe quel
+navigateur (PC, tablette, téléphone au cockpit).
+
+### Ajouté
+- ✅ **Interface web** : diagramme (Catmull-Rom, zones VMG, mode dynamique), tableau de
+  données éditable, table VMG, export PDF par l'impression du navigateur, aide intégrée,
+  français/anglais, thème clair/sombre.
+- ✅ **Bateau** : ouverture et création à chaud, bateaux récents, éditeur d'inventaire et de
+  polaires (critères en cases à cocher, critères orphelins signalés).
+- ✅ **Capture live** : NMEA UDP / TCP et VDR qtVlm ; état du bateau en direct, routage
+  multi-polaires, bouton Moteur, polaire construite en direct, enregistrement à l'arrêt.
+- ✅ **Service systemd** (`make install`), réouverture du dernier bateau au démarrage.
+- ✅ **Sécurité** : mot de passe obligatoire pour une écoute réseau (secret lu dans
+  l'environnement, jamais sur la ligne de commande), page de connexion avec cookie
+  `HttpOnly`/`SameSite=Strict` d'un an, anti-force-brute.
+- ✅ Serveur **Windows** (MSYS2) en plus de Linux x64 et ARM64.
+
+### Modifié
+- 🔄 Cœur métier extrait dans `libpolar` (glib + sqlite, aucun toolkit graphique).
+- 🔄 **Vent vrai rapporté à l'eau (`MWV,T`) prioritaire** sur le vent rapporté au fond
+  (`MWD` + cap), faussé par le courant ; `MWD` reste le repli.
+- 🔄 Percentile d'agrégation réglable dans l'onglet Données (P85–P95).
+
+### Corrigé
+- 🐛 **Bord bâbord perdu à l'import NMEA** : les angles `MWV` (0–360°) au-delà de 180°
+  étaient rejetés. Les polaires construites depuis des logs NMEA avec `MWV,T` ne
+  contenaient que le bord tribord : **les reconstruire**. Les polaires issues de VDR ne
+  sont pas concernées.
+
+### Retiré
+- ❌ Application **GTK** et ses paquets desktop (`polar_doctor.desktop`, `build_windows.sh`).
+- ❌ Build **macOS** (non vérifiable ; le navigateur reste utilisable sur Mac).
+
 ## [1.3.0] - 2026-06-12
 
 ### Ajouté

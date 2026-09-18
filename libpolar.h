@@ -3,10 +3,8 @@
  * Cœur métier de polar_doctor, INDÉPENDANT de l'UI : types, constantes, globals
  * et prototypes du modèle de polaire, de l'import (NMEA/VDR) et de la config bateau.
  *
- * Ne tire PAS GTK ni Cairo — seulement glib (gboolean, g_*) et sqlite3, des
- * dépendances ubiquitaires sans rapport avec le packaging GTK. Ce header est
- * partagé par l'appli GTK (via polar_doctor.h) ET par l'interface web / le moteur
- * de capture, qui se lient au cœur sans toolkit graphique.
+ * Ne dépend que de glib (gboolean, g_*) et sqlite3 : aucun toolkit graphique.
+ * L'interface est le serveur web (web/server.c), qui se lie à ce cœur.
  */
 #ifndef LIBPOLAR_H
 #define LIBPOLAR_H
@@ -144,7 +142,7 @@ extern polar_grid_t *g_live_grid;
 extern double g_live_cur_twa, g_live_cur_bsp;
 
 // Progression d'un traitement long, abstraite de l'UI : `update` est appelé
-// périodiquement (l'appli GTK y rafraîchit son label + pompe la boucle ; le web
+// périodiquement (une interface peut y afficher l'avancement ; le serveur web
 // passe NULL). cancel_flag (optionnel) permet d'annuler.
 typedef struct {
     void (*update)(void *ud, const char *msg);

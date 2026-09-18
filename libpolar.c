@@ -1,7 +1,7 @@
 /*
  * libpolar.c — définitions des variables globales du cœur métier.
- * Séparées de main.c pour que l'interface web / le moteur de capture puissent
- * se lier au cœur (polar_data + import + boat_config) sans l'appli GTK.
+ * Isolées du serveur pour que tout programme puisse
+ * se lier au cœur (polar_data + import + boat_config).
  */
 #include "libpolar.h"
 

@@ -13,9 +13,13 @@ on:
 permissions:
   contents: write
 
+# Serveur web polar_doctor_web : glib + sqlite, aucun toolkit graphique.
+# Chaque plateforme compile PUIS démarre le serveur et interroge l'API
+# (test de fumée) avant d'empaqueter.
+
 jobs:
   build-linux:
-    name: Build on Linux
+    name: Build on Linux x64
     runs-on: ubuntu-latest
 
     steps:
@@ -25,34 +29,26 @@ jobs:
     - name: Install dependencies
       run: |
         sudo apt-get update
-        sudo apt-get install -y build-essential libgtk-3-dev libsqlite3-dev pkg-config
+        sudo apt-get install -y build-essential pkg-config libglib2.0-dev libsqlite3-dev curl
 
     - name: Build
-      run: |
-        gcc -o polar_doctor *.c \
-          `pkg-config --cflags --libs gtk+-3.0` \
-          -lm -lsqlite3 -Wall -O2
+      run: make
 
-    - name: Set executable permissions
-      run: chmod +x polar_doctor
-
-    - name: Test binary
+    - name: Smoke test
       run: |
-        # Ne pas exécuter : appli GUI sans flag --version, gtk_main() bloque
-        # (sur macOS le backend quartz ne sort pas faute de display -> hang).
-        file polar_doctor
-        test -x polar_doctor
+        ./polar_doctor_web --help
+        ./polar_doctor_web --port 18080 & PID=$!
+        sleep 1
+        curl -fsS http://127.0.0.1:18080/api/polar
+        curl -fsS -o /dev/null http://127.0.0.1:18080/
+        kill $PID
 
     - name: Create package
       run: |
-        mkdir -p dist
-        tar -czf dist/polar_doctor-linux-x64.tar.gz \
-          polar_doctor \
-          polar_doctor.png \
-          polar_doctor.svg \
-          polar_doctor.desktop \
-          README.md \
-          BUILD.md
+        mkdir -p dist/polar_doctor-linux-x64
+        cp polar_doctor_web web/polar_doctor_web.service web/polar_doctor_web.default \
+           README.md LICENSE dist/polar_doctor-linux-x64/
+        tar -C dist -czf dist/polar_doctor-linux-x64.tar.gz polar_doctor-linux-x64
 
     - name: Upload artifact
       uses: actions/upload-artifact@v7
@@ -78,7 +74,7 @@ jobs:
       with:
         platforms: arm64
 
-    - name: Build in ARM64 container
+    - name: Build and smoke test in ARM64 container
       run: |
         docker run --rm --platform linux/arm64 \
           -v ${{ github.workspace }}:/workspace \
@@ -87,28 +83,24 @@ jobs:
           bash -c "
             export DEBIAN_FRONTEND=noninteractive && \
             apt-get update && \
-            apt-get install -y build-essential libgtk-3-dev libsqlite3-dev pkg-config && \
-            gcc -o polar_doctor *.c \
-              \$(pkg-config --cflags --libs gtk+-3.0) \
-              -lm -lsqlite3 -Wall -O2 && \
-            chmod +x polar_doctor
+            apt-get install -y build-essential pkg-config libglib2.0-dev libsqlite3-dev curl && \
+            make && \
+            ./polar_doctor_web --help && \
+            { ./polar_doctor_web --port 18080 & PID=\$!; sleep 3; \
+              curl -fsS -o /dev/null http://127.0.0.1:18080/api/polar; R=\$?; kill \$PID; exit \$R; }
           "
 
     - name: Verify binary architecture
       run: |
-        file polar_doctor
-        readelf -h polar_doctor | grep Machine || true
+        file polar_doctor_web
+        readelf -h polar_doctor_web | grep Machine || true
 
     - name: Create package
       run: |
-        mkdir -p dist
-        tar -czf dist/polar_doctor-linux-arm64.tar.gz \
-          polar_doctor \
-          polar_doctor.png \
-          polar_doctor.svg \
-          polar_doctor.desktop \
-          README.md \
-          BUILD.md
+        mkdir -p dist/polar_doctor-linux-arm64
+        cp polar_doctor_web web/polar_doctor_web.service web/polar_doctor_web.default \
+           README.md LICENSE dist/polar_doctor-linux-arm64/
+        tar -C dist -czf dist/polar_doctor-linux-arm64.tar.gz polar_doctor-linux-arm64
 
     - name: Upload artifact
       uses: actions/upload-artifact@v7
@@ -117,43 +109,8 @@ jobs:
         path: dist/polar_doctor-linux-arm64.tar.gz
         retention-days: 30
 
-  # macOS : Apple Silicon uniquement (les runners Intel macos-13 ne sont plus
-  # disponibles). Les Mac Intel compilent depuis les sources (voir BUILD.md).
-  build-macos:
-    name: Build on macOS (Apple Silicon)
-    runs-on: macos-14
-    timeout-minutes: 40
-    continue-on-error: true
-    steps:
-    - name: Checkout code
-      uses: actions/checkout@v6
-    - name: Install dependencies
-      run: brew install gtk+3 sqlite pkg-config
-    - name: Build (arm64)
-      run: |
-        gcc -arch arm64 -o polar_doctor *.c \
-          `pkg-config --cflags --libs gtk+-3.0` \
-          -lm -lsqlite3 -Wall -O2
-        file polar_doctor
-        test -x polar_doctor
-    - name: Create package
-      run: |
-        mkdir -p dist
-        tar -czf dist/polar_doctor-macos-arm64.tar.gz \
-          polar_doctor \
-          polar_doctor.png \
-          polar_doctor.svg \
-          README.md \
-          BUILD.md
-    - name: Upload artifact
-      uses: actions/upload-artifact@v7
-      with:
-        name: polar_doctor-macos-arm64
-        path: dist/polar_doctor-macos-arm64.tar.gz
-        retention-days: 30
-
   build-windows:
-    name: Build on Windows
+    name: Build on Windows x64
     runs-on: windows-latest
     defaults:
       run:
@@ -169,101 +126,49 @@ jobs:
         msystem: MINGW64
         update: true
         install: >-
+          make
+          curl
           mingw-w64-x86_64-gcc
-          mingw-w64-x86_64-gtk3
+          mingw-w64-x86_64-pkgconf
+          mingw-w64-x86_64-glib2
           mingw-w64-x86_64-sqlite3
-          mingw-w64-x86_64-pkg-config
-          zip
 
     - name: Build
+      run: make
+
+    - name: Smoke test
       run: |
-        gcc -o polar_doctor.exe *.c \
-          `pkg-config --cflags --libs gtk+-3.0` \
-          -lm -lsqlite3 -mwindows -D_WIN32 -Wall -O2
+        ./polar_doctor_web.exe --help
+        ./polar_doctor_web.exe --port 18080 & PID=$!
+        sleep 2
+        curl -fsS http://127.0.0.1:18080/api/polar
+        curl -fsS -o /dev/null http://127.0.0.1:18080/
+        kill $PID 2>/dev/null || taskkill //F //IM polar_doctor_web.exe
 
-    - name: Create portable package
+    - name: Create package (exe + DLL)
       run: |
-        mkdir -p polar_doctor_win
-        cp polar_doctor.exe polar_doctor_win/
-        cp polar_doctor.png polar_doctor_win/
-        cp polar_doctor.svg polar_doctor_win/
-        cp README.md polar_doctor_win/
-        cp BUILD.md polar_doctor_win/
+        mkdir -p dist/polar_doctor_win
+        cp polar_doctor_web.exe README.md LICENSE dist/polar_doctor_win/
+        # DLL MinGW réellement liées (glib, sqlite, runtime)
+        ldd polar_doctor_web.exe | grep -i '/mingw64/' | awk '{print $3}' | sort -u \
+          | xargs -I {} cp {} dist/polar_doctor_win/
+        ls -la dist/polar_doctor_win
 
-        # Copy all required DLLs with multiple passes
-        echo "Copying DLLs - Pass 1 (from exe)"
-        ldd polar_doctor.exe | grep mingw64 | awk '{print $3}' | xargs -I {} cp {} polar_doctor_win/ 2>/dev/null || true
-
-        # Additional passes to catch transitive dependencies
-        echo "Copying DLLs - Pass 2"
-        for dll in polar_doctor_win/*.dll; do [ -f "$dll" ] && ldd "$dll" 2>/dev/null | grep mingw64 | awk '{print $3}' | xargs -I {} cp {} polar_doctor_win/ 2>/dev/null || true; done
-
-        echo "Copying DLLs - Pass 3"
-        for dll in polar_doctor_win/*.dll; do [ -f "$dll" ] && ldd "$dll" 2>/dev/null | grep mingw64 | awk '{print $3}' | xargs -I {} cp {} polar_doctor_win/ 2>/dev/null || true; done
-
-        echo "Copying DLLs - Pass 4"
-        for dll in polar_doctor_win/*.dll; do [ -f "$dll" ] && ldd "$dll" 2>/dev/null | grep mingw64 | awk '{print $3}' | xargs -I {} cp {} polar_doctor_win/ 2>/dev/null || true; done
-
-        # Copy GTK runtime files
-        mkdir -p polar_doctor_win/share/glib-2.0
-        mkdir -p polar_doctor_win/share/icons
-        mkdir -p polar_doctor_win/lib/gdk-pixbuf-2.0
-
-        cp -r /mingw64/share/glib-2.0/schemas polar_doctor_win/share/glib-2.0/ || true
-        cp -r /mingw64/share/icons/Adwaita polar_doctor_win/share/icons/ || true
-        cp -r /mingw64/lib/gdk-pixbuf-2.0/2.10.0 polar_doctor_win/lib/gdk-pixbuf-2.0/ || true
-
-        # Dépendances des loaders gdk-pixbuf : ils sont chargés DYNAMIQUEMENT, donc
-        # invisibles à `ldd polar_doctor.exe`. Sans elles (notamment librsvg-2-2.dll
-        # + libxml2… pour le loader SVG), GTK fait un abort fatal au démarrage en
-        # chargeant l'icône SVG du thème Adwaita. On copie les deps de chaque loader.
-        echo "Copying gdk-pixbuf loader dependencies (librsvg, etc.)"
-        for dll in polar_doctor_win/lib/gdk-pixbuf-2.0/2.10.0/loaders/*.dll; do
-          [ -f "$dll" ] && ldd "$dll" 2>/dev/null | grep mingw64 | awk '{print $3}' | xargs -I {} cp -u {} polar_doctor_win/ 2>/dev/null || true
-        done
-        # Passes transitives (ex. librsvg -> libxml2 ; déjà copiées -> deps de deps)
-        for i in 1 2 3; do
-          for dll in polar_doctor_win/*.dll; do [ -f "$dll" ] && ldd "$dll" 2>/dev/null | grep mingw64 | awk '{print $3}' | xargs -I {} cp -u {} polar_doctor_win/ 2>/dev/null || true; done
-        done
-
-        # Schémas GSettings compilés (requis par le sélecteur de fichiers)
-        glib-compile-schemas polar_doctor_win/share/glib-2.0/schemas || true
-
-        # Helper gdbus (spawné à l'exécution par GIO, non listé par ldd)
-        cp /mingw64/bin/gdbus.exe polar_doctor_win/ 2>/dev/null || true
-
-        # List all copied DLLs for debugging
-        echo "Copied DLLs:"
-        ls -lh polar_doctor_win/*.dll
-
-        # Create README for Windows
-        cat > polar_doctor_win/LISEZMOI.txt << 'EOF'
-        Polar Doctor - Version Windows
-        ===============================
-
-        Pour lancer:
-        - Double-cliquer sur polar_doctor.exe
-
-        Note: Cette version utilise des dialogues de fichiers natifs Windows
-        pour une meilleure stabilité.
-
-        Si une erreur apparaît:
-        - Assurez-vous que tous les fichiers .dll sont présents
-        - Lancez depuis l'invite de commande pour voir les erreurs détaillées
-
-        Documentation complète: README.md
-        EOF
+    - name: Test packaged exe (DLL complètes)
+      run: |
+        cd dist/polar_doctor_win
+        PATH=/usr/bin ./polar_doctor_web.exe --help
 
     - name: Upload artifact
       uses: actions/upload-artifact@v7
       with:
         name: polar_doctor-windows-x64
-        path: polar_doctor_win/
+        path: dist/polar_doctor_win/
         retention-days: 30
 
   create-release:
     name: Create Release
-    needs: [build-linux, build-linux-arm64, build-macos, build-windows]
+    needs: [build-linux, build-linux-arm64, build-windows]
     runs-on: ubuntu-latest
     if: startsWith(github.ref, 'refs/tags/')
 
@@ -284,13 +189,6 @@ jobs:
         name: polar_doctor-linux-arm64
         path: ./artifacts
 
-    - name: Download macOS artifact
-      uses: actions/download-artifact@v8
-      continue-on-error: true  # macOS peut avoir échoué/timeout : ne bloque pas la release
-      with:
-        name: polar_doctor-macos-arm64
-        path: ./artifacts
-
     - name: Download Windows artifact
       uses: actions/download-artifact@v8
       with:
@@ -305,9 +203,7 @@ jobs:
     - name: Generate checksums
       run: |
         cd artifacts
-        # Ne checksummer que les artefacts réellement présents (ARM64 peut manquer)
-        for f in polar_doctor-linux-x64.tar.gz polar_doctor-linux-arm64.tar.gz \
-                 polar_doctor-macos-arm64.tar.gz polar_doctor-windows-x64.zip; do
+        for f in polar_doctor-linux-x64.tar.gz polar_doctor-linux-arm64.tar.gz polar_doctor-windows-x64.zip; do
           [ -f "$f" ] && sha256sum "$f" > "$f.sha256"
         done
         sha256sum *.tar.gz *.zip 2>/dev/null > SHA256SUMS.txt || true
@@ -321,58 +217,48 @@ jobs:
           artifacts/polar_doctor-linux-x64.tar.gz.sha256
           artifacts/polar_doctor-linux-arm64.tar.gz
           artifacts/polar_doctor-linux-arm64.tar.gz.sha256
-          artifacts/polar_doctor-macos-arm64.tar.gz
-          artifacts/polar_doctor-macos-arm64.tar.gz.sha256
           artifacts/polar_doctor-windows-x64.zip
           artifacts/polar_doctor-windows-x64.zip.sha256
           artifacts/SHA256SUMS.txt
         body: |
           # Polar Doctor ${{ github.ref_name }}
 
+          Polar Doctor est désormais une **interface web** : un petit serveur
+          (`polar_doctor_web`) tourne sur l'ordinateur de bord et s'utilise depuis
+          n'importe quel navigateur (PC, tablette, téléphone). Voir le CHANGELOG.
+
           ## 📦 Installation
 
-          ### Linux x86_64 (PC standard)
+          ### Linux x86_64 / ARM64 (Raspberry Pi)
           ```bash
-          tar -xzf polar_doctor-linux-x64.tar.gz
-          ./polar_doctor
+          tar -xzf polar_doctor-linux-x64.tar.gz     # ou -arm64
+          cd polar_doctor-linux-x64
+          ./polar_doctor_web ~/MonBateau             # puis http://localhost:8081
           ```
-
-          ### Linux ARM64 (Raspberry Pi, serveurs ARM)
+          En service systemd (démarrage automatique, accès depuis le réseau) :
           ```bash
-          tar -xzf polar_doctor-linux-arm64.tar.gz
-          ./polar_doctor
+          sudo install -m755 polar_doctor_web /usr/local/bin/
+          sed "s/@USER@/$USER/" polar_doctor_web.service | sudo tee /etc/systemd/system/polar_doctor_web.service
+          sudo install -m600 polar_doctor_web.default /etc/default/polar_doctor_web
+          sudo nano /etc/default/polar_doctor_web      # WEB_AUTH=utilisateur:motdepasse
+          sudo systemctl daemon-reload && sudo systemctl enable --now polar_doctor_web
           ```
-
-          ### macOS (Apple Silicon / arm64)
-          ```bash
-          tar -xzf polar_doctor-macos-arm64.tar.gz
-          ./polar_doctor
-          ```
-
-          Note: You may need to install GTK+3: `brew install gtk+3`
 
           ### Windows
           1. Extraire `polar_doctor-windows-x64.zip`
-          2. Double-cliquer sur `polar_doctor.exe`
+          2. Lancer `polar_doctor_web.exe C:\chemin\MonBateau`
+          3. Ouvrir http://localhost:8081
+
+          Pour un accès depuis le réseau (`--bind 0.0.0.0`), un mot de passe est
+          obligatoire : variable d'environnement `WEB_AUTH=utilisateur:motdepasse`.
 
           ## 🔐 Vérification des fichiers
-
-          Pour vérifier l'intégrité des téléchargements :
           ```bash
           sha256sum -c polar_doctor-linux-x64.tar.gz.sha256
-          sha256sum -c polar_doctor-linux-arm64.tar.gz.sha256
-          sha256sum -c polar_doctor-macos-arm64.tar.gz.sha256
-          sha256sum -c polar_doctor-windows-x64.zip.sha256
           ```
-
-          Ou consultez le fichier `SHA256SUMS.txt` pour tous les checksums.
-
-          ## 📝 Changelog
-
-          Voir les commits pour les détails des changements.
+          Ou consultez `SHA256SUMS.txt`.
 
           ## 🐛 Bugs
-
           Signalez les bugs sur https://github.com/${{ github.repository }}/issues
         draft: false
         prerelease: false
