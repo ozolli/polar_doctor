@@ -52,8 +52,9 @@ Pour distribuer l'exécutable, copier à côté de lui les DLL MinGW qu'il utili
 ldd polar_doctor_web.exe | grep -i /mingw64/ | awk '{print $3}' | xargs -I {} cp {} dist/
 ```
 
-Accès depuis le réseau : `set WEB_AUTH=utilisateur:motdepasse` puis
-`polar_doctor_web.exe C:\chemin\MonBateau --bind 0.0.0.0`.
+Accès depuis le réseau : `set "WEB_AUTH=utilisateur:motdepasse"` puis
+`polar_doctor_web.exe C:\chemin\MonBateau --bind 0.0.0.0` (PowerShell, `setx`, `.bat` : voir
+[README → Où mettre le mot de passe ?](README.md#où-mettre-le-mot-de-passe-)).
 
 ## Intégration continue
 

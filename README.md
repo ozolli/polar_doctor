@@ -131,13 +131,54 @@ polar_doctor_web [dossier-bateau | fichier.pol] [--port N] [--bind ADDR] [--allo
 
 L'interface **écrit** des fichiers (polaires, `boat.cfg`), crée des dossiers et lit des fichiers
 du serveur. Donc :
-- en local (`127.0.0.1`), pas de mot de passe ;
-- sur le réseau, **mot de passe obligatoire** : le serveur refuse de démarrer sans lui (sauf
-  `--allow-anonymous`). Il se donne par la variable d'environnement `WEB_AUTH=utilisateur:motdepasse`,
-  jamais sur la ligne de commande (lisible par tous via `/proc`) ;
+- en local (`127.0.0.1`, le défaut), pas de mot de passe ;
+- sur le réseau (`--bind 0.0.0.0`), **mot de passe obligatoire** : le serveur refuse de démarrer
+  sans lui (sauf `--allow-anonymous`) ;
 - connexion par **page web** (pas de popup) : un cookie `HttpOnly`, `SameSite=Strict`, valable
   1 an par appareil. Changer le mot de passe déconnecte tous les appareils ;
 - `curl -u utilisateur:motdepasse` reste accepté pour les scripts.
+
+### Où mettre le mot de passe ?
+
+Le serveur le lit dans la **variable d'environnement** `WEB_AUTH` (au format
+`utilisateur:motdepasse`), jamais sur la ligne de commande. Il n'y a pas de fichier de
+configuration propre à Polar Doctor : c'est le moyen de lancement qui fournit la variable.
+
+**Linux, en service systemd** — dans le fichier **`/etc/default/polar_doctor_web`** (créé par
+`sudo make install`, ou copié depuis `polar_doctor_web.default` de l'archive), lisible par root
+seul :
+
+```bash
+sudo nano /etc/default/polar_doctor_web
+#   WEB_AUTH=moi:MonMotDePasse      (le service écoute déjà sur le réseau)
+sudo systemctl restart polar_doctor_web
+```
+
+**Linux, lancé à la main** — dans le terminal, sans que le mot de passe reste dans l'historique :
+
+```bash
+read -rsp 'Mot de passe : ' P; echo
+WEB_AUTH="moi:$P" ./polar_doctor_web ~/MonBateau --bind 0.0.0.0
+```
+
+**Windows** — pas de fichier non plus ; la variable se pose avant de lancer l'exécutable :
+
+```bat
+:: Invite de commandes (cmd), pour cette fenêtre seulement
+set "WEB_AUTH=moi:MonMotDePasse"
+polar_doctor_web.exe C:\Bateaux\MonBateau --bind 0.0.0.0
+```
+
+```powershell
+# PowerShell, pour cette fenêtre seulement
+$env:WEB_AUTH = "moi:MonMotDePasse"
+.\polar_doctor_web.exe C:\Bateaux\MonBateau --bind 0.0.0.0
+```
+
+Pour ne pas la retaper : `setx WEB_AUTH "moi:MonMotDePasse"` l'enregistre pour votre compte
+Windows (en clair dans votre profil ; prise en compte dans les **nouvelles** fenêtres). On peut
+aussi mettre les deux lignes `set` + lancement dans un fichier `.bat` à côté de l'exécutable.
+Au premier lancement réseau, le pare-feu Windows demande d'autoriser le programme.
 
 ## 📊 Format des fichiers
 

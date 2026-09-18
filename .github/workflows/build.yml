@@ -249,8 +249,13 @@ jobs:
           2. Lancer `polar_doctor_web.exe C:\chemin\MonBateau`
           3. Ouvrir http://localhost:8081
 
-          Pour un accès depuis le réseau (`--bind 0.0.0.0`), un mot de passe est
-          obligatoire : variable d'environnement `WEB_AUTH=utilisateur:motdepasse`.
+          Pour un accès depuis le réseau, un mot de passe est obligatoire. Dans l'invite
+          de commandes, dans le dossier extrait :
+          ```bat
+          set "WEB_AUTH=utilisateur:motdepasse"
+          polar_doctor_web.exe C:\chemin\MonBateau --bind 0.0.0.0
+          ```
+          PowerShell, `setx`, fichier `.bat` : voir le README, section « Où mettre le mot de passe ? ».
 
           ## 🔐 Vérification des fichiers
           ```bash
