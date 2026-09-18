@@ -13,6 +13,8 @@ tourne sur l'ordinateur de bord, et s'utilise depuis **n'importe quel navigateur
 table à carte, sur un portable, une tablette ou un téléphone au cockpit. Aucun logiciel à
 installer sur les appareils clients.
 
+![Polar Doctor — diagramme polaire dans le navigateur](docs/screenshot.png)
+
 ## ⚓ C'est quoi une polaire (et à quoi sert ce programme) ?
 
 La **polaire** d'un voilier est un tableau — et un diagramme — qui donne la vitesse
