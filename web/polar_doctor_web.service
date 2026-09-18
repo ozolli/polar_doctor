@@ -1,0 +1,42 @@
+# polar_doctor_web.service — interface web de polar_doctor (polaires, édition,
+# capture live). Installé par `sudo make install-web` (@USER@ = utilisateur sudo).
+#
+#   sudo systemctl daemon-reload
+#   sudo systemctl enable --now polar_doctor_web
+#   http://<hôte>:8081/
+#
+# UTILISATEUR : tourne sous l'utilisateur du bateau, PAS en root : il écrit les
+# polaires et boat.cfg dans son dossier et les bateaux récents dans
+# ~/.config/polar_doctor. En root, ces fichiers deviendraient la propriété de
+# root. Pour la même raison, pas de ProtectHome (écriture dans /home nécessaire).
+#
+# AUTHENTIFICATION : poser WEB_AUTH=user:pass dans /etc/default/polar_doctor_web
+# (fichier root 0600, lu par systemd avant l'abandon des privilèges). Le secret
+# arrive dans l'ENVIRONNEMENT du processus, jamais sur la ligne de commande
+# (lisible par tout utilisateur local via /proc). Avec BIND non local et SANS
+# WEB_AUTH, le serveur REFUSE de démarrer (même règle que n2k-mux-web).
+#
+# BATEAU : sans POLAR_DOCTOR_BOAT, rouvre le bateau le plus récent.
+# Pas de sh -c : PORT et BIND sont des noms simples développés par systemd ;
+# WEB_AUTH et POLAR_DOCTOR_BOAT sont lus par le serveur dans son environnement.
+
+[Unit]
+Description=polar_doctor — interface web (polaires et capture live)
+Documentation=https://github.com/ozolli/polar_doctor
+After=network.target n2k-mux-can.service n2k-mux-sim.service
+
+[Service]
+Type=simple
+User=@USER@
+Environment=PORT=8081 BIND=0.0.0.0
+EnvironmentFile=-/etc/default/polar_doctor_web
+ExecStart=/usr/local/bin/polar_doctor_web --port ${PORT} --bind ${BIND}
+Restart=always
+RestartSec=3
+
+NoNewPrivileges=true
+ProtectSystem=full
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target

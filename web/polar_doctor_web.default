@@ -1,0 +1,13 @@
+# /etc/default/polar_doctor_web — réglages du service polar_doctor_web.
+# Fichier root 0600 : il contient le mot de passe.
+
+# Identifiants (user:pass). OBLIGATOIRE si BIND n'est pas local : sans eux le
+# service refuse de démarrer.
+WEB_AUTH=
+
+# Port et adresse d'écoute (8080 = n2k-mux-web).
+#PORT=8081
+#BIND=0.0.0.0
+
+# Bateau ouvert au démarrage (défaut : le plus récent).
+#POLAR_DOCTOR_BOAT=/home/utilisateur/MonBateau

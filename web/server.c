@@ -36,6 +36,7 @@ static PolarData    g_polar;
 static int          g_loaded = 0;
 static const char  *g_auth = NULL;     /* "user:pass" attendu (NULL = pas d'auth) */
 static char         g_auth_b64[352];
+#define AUTH_RAW_MAX 256                   /* longueur max acceptée de "user:pass" */
 
 /* Bateau = dossier de .pol (liste POSIX ; le boat.cfg viendra avec libpolar). */
 #define MAXPOL 64
@@ -1265,20 +1266,63 @@ int main(int argc, char **argv)
     int port = 8081;   /* 8080 est pris par n2k-mux-web */
     const char *bind_addr = "127.0.0.1";
     const char *pol = NULL;
+    int allow_anon = 0;   /* --allow-anonymous : écoute réseau sans auth, assumée */
 
     for (int i = 1; i < argc; i++) {
         if (strcmp(argv[i], "--port") == 0 && i + 1 < argc) port = atoi(argv[++i]);
         else if (strcmp(argv[i], "--bind") == 0 && i + 1 < argc) bind_addr = argv[++i];
         else if (strcmp(argv[i], "--auth") == 0 && i + 1 < argc) g_auth = argv[++i];
+        else if (strcmp(argv[i], "--allow-anonymous") == 0) allow_anon = 1;
         else if (strcmp(argv[i], "-h") == 0 || strcmp(argv[i], "--help") == 0) {
             fprintf(stderr,
                 "Usage : %s [fichier.pol | dossier-bateau] [--port N] [--bind ADDR] [--auth user:pass]\n"
                 "  --port N     port d'écoute (défaut 8081 ; 8080 = n2k-mux-web)\n"
                 "  --bind ADDR  adresse d'écoute (défaut 127.0.0.1 ; 0.0.0.0 = LAN)\n"
-                "  --auth u:p   authentification HTTP Basic\n", argv[0]);
+                "  --auth u:p   authentification HTTP Basic (préférer l'environnement :\n"
+                "               POLAR_DOCTOR_WEB_AUTH ou WEB_AUTH — argv est lisible via /proc)\n"
+                "  --allow-anonymous  autorise l'écoute réseau SANS authentification\n"
+                "  Sans chemin : POLAR_DOCTOR_BOAT, sinon le bateau le plus récent.\n", argv[0]);
             return 0;
         } else if (argv[i][0] != '-') pol = argv[i];
         else { fprintf(stderr, "option inconnue : %s\n", argv[i]); return 2; }
+    }
+
+    /* Le credential peut venir de l'environnement plutôt que de la ligne de
+     * commande : argv est lisible par tout utilisateur local via /proc. */
+    if (!g_auth) {
+        const char *env = getenv("POLAR_DOCTOR_WEB_AUTH");
+        if (!env || !env[0]) env = getenv("WEB_AUTH");   /* /etc/default/polar_doctor_web */
+        if (env && env[0]) g_auth = env;
+    }
+    if (g_auth) {
+        if (!strchr(g_auth, ':')) { fprintf(stderr, "--auth attend le format user:pass\n"); return 2; }
+        if (strlen(g_auth) > AUTH_RAW_MAX) {
+            fprintf(stderr, "--auth : credential trop long (max %d caractères)\n", AUTH_RAW_MAX); return 2;
+        }
+        b64encode(g_auth, g_auth_b64, sizeof g_auth_b64);
+    }
+
+    /* L'interface ÉCRIT polaires et boat.cfg, crée des dossiers et lit des chemins
+     * serveur (/api/import) : l'exposer hors de la boucle locale sans
+     * authentification donne ce pouvoir à tout le réseau. On refuse, sauf demande
+     * explicite (--allow-anonymous). Même règle que n2k-mux-web. */
+    if (!g_auth && !allow_anon && strncmp(bind_addr, "127.", 4) != 0 &&
+        strcmp(bind_addr, "::1") != 0 && strcmp(bind_addr, "localhost") != 0) {
+        fprintf(stderr,
+            "polar_doctor_web : refus d'écouter sur %s sans authentification.\n"
+            "  Poser WEB_AUTH=user:pass dans /etc/default/polar_doctor_web,\n"
+            "  ou --bind 127.0.0.1, ou --allow-anonymous pour assumer le risque.\n",
+            bind_addr);
+        return 2;
+    }
+
+    /* Sans chemin : POLAR_DOCTOR_BOAT, sinon le bateau le plus récent (service
+     * systemd sans configuration : il rouvre le dernier bateau utilisé). */
+    static char recent0[BOAT_RECENT_MAX][BOAT_PATH_LEN];
+    if (!pol) {
+        const char *eb = getenv("POLAR_DOCTOR_BOAT");
+        if (eb && eb[0]) pol = eb;
+        else if (boat_recent_load(recent0, BOAT_RECENT_MAX) > 0) pol = recent0[0];
     }
 
     init_polar_data(&g_polar);
@@ -1293,11 +1337,6 @@ int main(int argc, char **argv)
         snprintf(g_pol_paths[0], sizeof g_pol_paths[0], "%s", pol);
         base_no_ext(pol, g_pol_names[0], sizeof g_pol_names[0]);
         g_npol = 1; g_cur = 0;
-    }
-
-    if (g_auth) {
-        if (!strchr(g_auth, ':')) { fprintf(stderr, "--auth attend user:pass\n"); return 2; }
-        b64encode(g_auth, g_auth_b64, sizeof g_auth_b64);
     }
 
     signal(SIGPIPE, SIG_IGN);

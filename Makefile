@@ -34,7 +34,7 @@ ifeq ($(OS),Windows_NT)
 endif
 
 # Règles de compilation
-.PHONY: all web clean install uninstall help dist
+.PHONY: all web install-web uninstall-web clean install uninstall help dist
 
 all: $(TARGET)
 	@echo "✓ Compilation terminée pour $(PLATFORM)"
@@ -44,9 +44,9 @@ $(TARGET): $(SRC) $(HDR)
 	@echo "Compilation de Polar Doctor pour $(PLATFORM)..."
 	$(CC) -o $(TARGET) $(SRC) $(CFLAGS) $(LDFLAGS)
 
-# --- Interface web (P0 : serveur HTTP zéro-dépendance + diagramme Canvas read-only) ---
-# Réutilise le cœur C (polar_data.c). Les cflags GTK ne servent qu'aux includes
-# (type gboolean) — aucun lien GTK/GLib (vérifiable via ldd). À terme : libpolar.
+# --- Interface web : serveur HTTP embarqué + SPA (diagramme, édition, live) ---
+# Liée au cœur libpolar (polar_data/import/boat_config) : glib + sqlite seulement,
+# ni GTK ni Cairo (vérifiable via ldd).
 WEB_TARGET = polar_doctor_web
 WEB_SRC    = web/server.c polar_data.c import.c boat_config.c libpolar.c
 WEB_CFLAGS = -std=c11 -D_GNU_SOURCE -Wall -O2 -I. `pkg-config --cflags glib-2.0`
@@ -58,6 +58,30 @@ $(WEB_TARGET): $(WEB_SRC) $(HDR)
 	@echo "Compilation de polar_doctor_web (cœur libpolar, sans GTK)..."
 	$(CC) -o $(WEB_TARGET) $(WEB_SRC) $(WEB_CFLAGS) $(WEB_LIBS)
 	@echo "✓ Web: ./$(WEB_TARGET) [fichier.pol|dossier] --port 8081 --bind 0.0.0.0"
+
+# --- Service systemd de l'interface web : make web && sudo make install-web ---
+# Ne recompile PAS (sous sudo, le binaire du dépôt deviendrait propriété de root).
+# Le service tourne sous l'utilisateur qui a lancé sudo (SERVICE_USER).
+SERVICE_USER ?= $(SUDO_USER)
+install-web:
+	@[ -x $(WEB_TARGET) ] || { echo "Lancer d'abord (sans sudo) : make web"; exit 1; }
+	@[ -n "$(SERVICE_USER)" ] || { echo "SERVICE_USER vide : lancer via sudo, ou SERVICE_USER=<utilisateur>"; exit 1; }
+	install -Dm755 $(WEB_TARGET) $(DESTDIR)$(INSTALL_PREFIX)/bin/$(WEB_TARGET)
+	install -d $(DESTDIR)/etc/systemd/system
+	sed 's/@USER@/$(SERVICE_USER)/' web/polar_doctor_web.service > $(DESTDIR)/etc/systemd/system/polar_doctor_web.service
+	chmod 644 $(DESTDIR)/etc/systemd/system/polar_doctor_web.service
+	install -Dm644 web/polar_doctor_web.default $(DESTDIR)/etc/default/polar_doctor_web.example
+	@[ -e $(DESTDIR)/etc/default/polar_doctor_web ] || install -Dm600 web/polar_doctor_web.default $(DESTDIR)/etc/default/polar_doctor_web
+	@if [ -z "$(DESTDIR)" ] && command -v systemctl >/dev/null; then systemctl daemon-reload; fi
+	@echo "✓ Service installé pour $(SERVICE_USER)."
+	@echo "  1) Poser WEB_AUTH=user:pass dans /etc/default/polar_doctor_web"
+	@echo "  2) sudo systemctl enable --now polar_doctor_web"
+
+uninstall-web:
+	-systemctl disable --now polar_doctor_web 2>/dev/null
+	rm -f $(DESTDIR)$(INSTALL_PREFIX)/bin/$(WEB_TARGET) $(DESTDIR)/etc/systemd/system/polar_doctor_web.service $(DESTDIR)/etc/default/polar_doctor_web.example
+	-systemctl daemon-reload 2>/dev/null
+	@echo "(/etc/default/polar_doctor_web conservé : il contient le mot de passe)"
 
 clean:
 	@echo "Nettoyage..."
@@ -138,6 +162,7 @@ help:
 	@echo "Utilisation:"
 	@echo "  make              - Compiler Polar Doctor (GTK)"
 	@echo "  make web          - Compiler l'interface web (polar_doctor_web)"
+	@echo "  sudo make install-web - Installer le service systemd polar_doctor_web"
 	@echo "  make clean        - Supprimer les fichiers compilés"
 	@echo "  make install      - Installer sur le système (Linux/macOS, nécessite sudo)"
 	@echo "  make uninstall    - Désinstaller (Linux/macOS, nécessite sudo)"
