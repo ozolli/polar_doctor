@@ -15,6 +15,11 @@
 # arrive dans l'ENVIRONNEMENT du processus, jamais sur la ligne de commande
 # (lisible par tout utilisateur local via /proc). Avec BIND non local et SANS
 # WEB_AUTH, le serveur REFUSE de démarrer (même règle que n2k-mux-web).
+# Connexion par PAGE WEB (pas de popup) : cookie de session HttpOnly/SameSite=Strict
+# valable 1 an = HMAC-SHA256 d'un secret serveur conservé dans
+# ~<utilisateur>/.config/polar_doctor/web_secret (0600). Changer le mot de passe
+# invalide les cookies ; supprimer ce fichier déconnecte tous les appareils.
+# `curl -u user:pass` reste accepté (HTTP Basic) pour les scripts.
 #
 # BATEAU : sans POLAR_DOCTOR_BOAT, rouvre le bateau le plus récent.
 # Pas de sh -c : PORT et BIND sont des noms simples développés par systemd ;

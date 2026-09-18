@@ -37,6 +37,7 @@ static int          g_loaded = 0;
 static const char  *g_auth = NULL;     /* "user:pass" attendu (NULL = pas d'auth) */
 static char         g_auth_b64[352];
 #define AUTH_RAW_MAX 256                   /* longueur max acceptée de "user:pass" */
+static char         g_token[65] = "";     /* cookie de session = HMAC-SHA256(secret, user:pass) */
 
 /* Bateau = dossier de .pol (liste POSIX ; le boat.cfg viendra avec libpolar). */
 #define MAXPOL 64
@@ -86,13 +87,14 @@ static const char PAGE[] =
 ".sl{display:inline-block;font-size:.82em;white-space:nowrap;margin:0 .6em .15em 0}\n"
 ".orph{color:#d4880f;font-style:italic}\n"
 "#cfgform input[type=text],#cfgform input:not([type]){background:var(--inbg);color:var(--fg);border:1px solid var(--border);border-radius:4px;padding:.15em .3em}\n"
-"@media print{header nav,#prt,#help,#lang,#theme,aside,#hmodal{display:none!important}#wrap{flex:1 1 100%}}\n"
+"@media print{header nav,#prt,#help,#logout,#lang,#theme,aside,#hmodal{display:none!important}#wrap{flex:1 1 100%}}\n"
 "#hbody{font-size:.93em;line-height:1.5}#hbody h2{margin:.2em 0 .6em}#hbody h3{color:var(--accent);margin:1em 0 .3em;font-size:1em}\n"
 "#hbody li{margin:.15em 0}#hbody ul,#hbody ol{margin:.2em 0 .2em 1.2em;padding:0}\n"
 "</style></head><body>\n"
 "<header><b>Polar Doctor</b><small id='fn'></small>\n"
 "<nav><button data-v='diag' class='on' data-i18n='tabdiag'>Diagramme</button><button data-v='data' data-i18n='tabdata'>Données</button><button data-v='vmg' data-i18n='tabvmg'>VMG</button><button data-v='cfg' data-i18n='tabcfg'>Bateau</button></nav>\n"
 "<span style='margin-left:auto;display:flex;gap:.5em'>"
+"<button id='logout' class='hbtn' title='Déconnexion' style='display:none'>⏻</button>"
 "<button id='help' class='hbtn' title='Aide'>?</button>"
 "<button id='prt' class='hbtn' title='Imprimer / PDF'>⎙</button>"
 "<button id='lang' class='hbtn'></button><button id='theme' class='hbtn'></button></span></header>\n"
@@ -148,6 +150,7 @@ static const char PAGE[] =
 "<div style='max-width:820px;margin:3vh auto;background:var(--panel);border:1px solid var(--border);border-radius:10px;padding:1em 1.4em;max-height:94vh;overflow:auto'>\n"
 "<button class='hbtn' id='hclose' style='float:right'>✕</button><div id='hbody'></div></div></div>\n"
 "<script>\n"
+"const _fetch=window.fetch;window.fetch=async(...a)=>{const r=await _fetch(...a);if(r.status===401)location.href='/';return r;};\n"  /* session expirée -> connexion */
 "let lang=localStorage.getItem('lang')||((navigator.language||'fr').toLowerCase().startsWith('fr')?'fr':'en');\n"
 "let theme=localStorage.getItem('theme')||((window.matchMedia&&matchMedia('(prefers-color-scheme: light)').matches)?'light':'dark');\n"
 "const L={fr:{boat:'Bateau',range:'Plage TWS',from:'De',to:'à',legend:'Légende (TWS)',kn:'nœuds',empty:'Aucune polaire chargée.',max:'Vitesse max',dyn:'Mode dynamique',dyn_on:'Activer',tws1:'TWS',live:'Live',source:'Source',start:'Démarrer',stop:'Arrêter',moteur:'Moteur',main1:'GV',head1:'Voile av.',sea1:'Mer',tabdiag:'Diagramme',tabdata:'Données',save1:'Enregistrer',addtwa:'+ TWA',addtws:'+ TWS',import:'Import fichiers',create1:'Créer',update1:'Mettre à jour',tabvmg:'VMG',vmgup:'Près',vmgdn:'Portant',recent:'Récents',open1:'Ouvrir',new1:'Nouveau',tabcfg:'Bateau',addpolar:'+ Polaire',cfgname:'Nom',charge1:'Charge',polars1:'Polaires',orphan:'Absent de l’inventaire — décochez pour le retirer',orphhint:'⚠ En orange : critères absents de l’inventaire. Décochez-les pour les retirer, ou ajoutez-les à l’inventaire.'},\n"
@@ -213,7 +216,7 @@ static const char PAGE[] =
 " }catch(e){}}\n"
 "async function loadBoats(){try{const b=await fetch('/api/boats').then(r=>r.json());const rec=b.recent||[];\n"
 " $('#recsel').innerHTML='<option value=\"\">—</option>'+rec.map(p=>'<option value=\"'+p+'\"'+(p===b.current?' selected':'')+'>'+(p.split('/').filter(Boolean).pop()||p)+'</option>').join('');\n"
-" if(b.current)$('#bfolder').value=b.current;}catch(e){}}\n"
+" if(b.current)$('#bfolder').value=b.current;$('#logout').style.display=b.auth?'':'none';}catch(e){}}\n"
 "async function openBoat(f){if(!f)return;$('#bmsg').textContent='…';\n"
 " const r=await fetch('/api/open?folder='+encodeURIComponent(f));\n"
 " if(r.ok){$('#bmsg').textContent='';await loadBoats();await loadBoat();await load();renderTable();}else $('#bmsg').textContent='✗';}\n"
@@ -402,6 +405,7 @@ static const char PAGE[] =
 "</ul>\n"
 "`};\n"
 "$('#help').onclick=()=>{$('#hbody').innerHTML=HELP[lang]||HELP.fr;$('#hmodal').style.display='block';};\n"
+"$('#logout').onclick=()=>{location.href='/logout';};\n"
 "$('#hclose').onclick=()=>{$('#hmodal').style.display='none';};\n"
 "$('#hmodal').onclick=e=>{if(e.target.id==='hmodal')$('#hmodal').style.display='none';};\n"
 "addEventListener('keydown',e=>{if(e.key==='Escape')$('#hmodal').style.display='none';});\n"
@@ -416,6 +420,39 @@ static const char PAGE[] =
 "$('#theme').onclick=()=>{theme=theme==='dark'?'light':'dark';localStorage.setItem('theme',theme);applyTheme();draw();};\n"
 "applyTheme();$('#lang').textContent=lang==='fr'?'EN':'FR';i18n();loadBoats();loadBoat();load();\n"
 "pollLive().then(()=>{if(LIVE&&LIVE.on)startPoll();});\n"
+"</script></body></html>\n";
+
+/* Page de connexion : remplace le popup HTTP Basic. Langue et thème repris du
+ * localStorage de la SPA (même origine). Erreur signalée par ?e=1 / ?e=2. */
+static const char LOGIN[] =
+"<!DOCTYPE html><html lang='fr'><head><meta charset='utf-8'>\n"
+"<meta name='viewport' content='width=device-width,initial-scale=1'>\n"
+"<title>Polar Doctor</title>\n"
+"<style>\n"
+":root{--bg:#0f1216;--fg:#d8dee5;--panel:#161b22;--border:#2a313a;--muted:#8b949e;--accent:#58a6ff;--inbg:#0b0e12;--active:#1f6feb}\n"
+"body.light{--bg:#fff;--fg:#1b2430;--panel:#f3f5f8;--border:#cfd8e3;--muted:#5b6675;--accent:#0b62d6;--inbg:#fff}\n"
+"*{box-sizing:border-box}body{margin:0;font:16px/1.45 system-ui,sans-serif;background:var(--bg);color:var(--fg);display:flex;min-height:100vh;align-items:center;justify-content:center}\n"
+"form{background:var(--panel);border:1px solid var(--border);border-radius:10px;padding:1.6em 1.8em;width:min(92vw,340px)}\n"
+"h1{margin:0 0 .8em;font-size:1.25em;color:var(--accent)}\n"
+"label{display:block;font-size:.85em;color:var(--muted);margin:.7em 0 .25em}\n"
+"input{width:100%;padding:.5em .6em;background:var(--inbg);color:var(--fg);border:1px solid var(--border);border-radius:6px;font-size:1em}\n"
+"button{margin-top:1.2em;width:100%;padding:.6em;background:var(--active);color:#fff;border:0;border-radius:6px;font-size:1em;cursor:pointer}\n"
+"#err{color:#ff7b72;font-size:.85em;margin-top:.8em;min-height:1.2em}\n"
+"</style></head><body>\n"
+"<form method='post' action='/login'>\n"
+"<h1>Polar Doctor</h1>\n"
+"<label for='u' id='lu'>Utilisateur</label><input id='u' name='user' autocomplete='username' autofocus required>\n"
+"<label for='p' id='lp'>Mot de passe</label><input id='p' name='pass' type='password' autocomplete='current-password' required>\n"
+"<button id='bt'>Se connecter</button><div id='err'></div></form>\n"
+"<script>\n"
+"const g=id=>document.getElementById(id);\n"
+"const lang=localStorage.getItem('lang')||((navigator.language||'fr').toLowerCase().startsWith('fr')?'fr':'en');\n"
+"const theme=localStorage.getItem('theme')||((window.matchMedia&&matchMedia('(prefers-color-scheme: light)').matches)?'light':'dark');\n"
+"document.body.classList.toggle('light',theme==='light');document.documentElement.lang=lang;\n"
+"const E={fr:{u:'Utilisateur',p:'Mot de passe',b:'Se connecter',e1:'Identifiants incorrects.',e2:'Trop de tentatives : réessayez dans 30 s.'},\n"
+"en:{u:'User',p:'Password',b:'Sign in',e1:'Wrong credentials.',e2:'Too many attempts: retry in 30 s.'}}[lang];\n"
+"g('lu').textContent=E.u;g('lp').textContent=E.p;g('bt').textContent=E.b;\n"
+"const q=new URLSearchParams(location.search).get('e');if(q)g('err').textContent=q==='2'?E.e2:E.e1;\n"
 "</script></body></html>\n";
 
 /* ------------------------------------------------------------- HTTP utils --- */
@@ -487,19 +524,29 @@ static int ct_eq(const char *a, const char *b)
     return d == 0;
 }
 
+/* 401 SANS en-tête WWW-Authenticate : c'est lui qui fait ouvrir le popup
+ * d'identification du navigateur. La SPA renvoie alors vers la page de connexion. */
 static void send_401(int fd)
 {
-    static const char *r =
-        "HTTP/1.1 401 Unauthorized\r\n"
-        "WWW-Authenticate: Basic realm=\"polar_doctor\", charset=\"UTF-8\"\r\n"
-        "Content-Type: text/plain\r\nContent-Length: 16\r\n"
-        "Cache-Control: no-store\r\nConnection: close\r\n\r\n401 Unauthorized";
-    ssize_t w = write(fd, r, strlen(r)); (void)w;
+    send_text(fd, 401, "Unauthorized", "application/json", "{\"ok\":false,\"err\":\"auth\"}");
 }
 
 static int authed(const char *req)
 {
     if (!g_auth) return 1;
+    /* Cookie de session posé par la page de connexion. */
+    const char *c = strcasestr(req, "\r\nCookie:");
+    if (c && g_token[0]) {
+        const char *eol = strstr(c + 2, "\r\n");
+        const char *t = strstr(c, "pd_auth=");
+        if (t && (!eol || t < eol)) {
+            t += 8; char tok[80]; size_t i = 0;
+            while (t[i] && t[i] != ';' && t[i] != '\r' && t[i] != ' ' && i < sizeof tok - 1) { tok[i] = t[i]; i++; }
+            tok[i] = '\0';
+            if (ct_eq(tok, g_token)) return 1;
+        }
+    }
+    /* Sinon HTTP Basic, pour curl -u et les scripts. */
     const char *h = strcasestr(req, "Authorization:");
     if (!h) return 0;
     const char *b = strcasestr(h, "Basic ");
@@ -668,7 +715,7 @@ static void serve_boats(int fd)
     o += (size_t)w; } while (0)
     char e[BOAT_PATH_LEN * 2];
     json_escape(g_boat_dir, e, sizeof e);
-    APP("{\"current\":\"%s\",\"recent\":[", e);
+    APP("{\"auth\":%s,\"current\":\"%s\",\"recent\":[", g_auth ? "true" : "false", e);
     for (int i = 0; i < n; i++) { json_escape(list[i], e, sizeof e); APP("%s\"%s\"", i ? "," : "", e); }
     APP("]}");
 #undef APP
@@ -1154,6 +1201,71 @@ static void serve_import(int fd, char *body, int update)
     send_text(fd, ok ? 200 : 400, ok ? "OK" : "Bad Request", "application/json", out);
 }
 
+/* 303 vers `loc`, avec éventuellement un Set-Cookie. */
+static void send_redirect(int fd, const char *loc, const char *cookie)
+{
+    char h[512];
+    int n = snprintf(h, sizeof h,
+        "HTTP/1.1 303 See Other\r\nLocation: %s\r\n%s%s%s"
+        "Content-Length: 0\r\nCache-Control: no-store\r\nConnection: close\r\n\r\n",
+        loc, cookie ? "Set-Cookie: " : "", cookie ? cookie : "", cookie ? "\r\n" : "");
+    if (n > 0) { ssize_t w = write(fd, h, (size_t)n); (void)w; }
+}
+
+/* POST /login (formulaire user/pass). Anti-force-brute NON bloquant : après 5
+ * échecs, refus pendant 30 s (un sleep gèlerait la boucle poll() et la capture). */
+static void handle_login(int fd, const char *body)
+{
+    static int fails = 0;
+    static time_t lock_until = 0;
+    time_t now = time(NULL);
+    if (now < lock_until) { send_redirect(fd, "/?e=2", NULL); return; }
+
+    char u[128] = "", p[256] = "", cred[400];
+    const char *pu = strstr(body, "user="), *pp = strstr(body, "pass=");
+    if (pu) url_decode(pu + 5, u, sizeof u);
+    if (pp) url_decode(pp + 5, p, sizeof p);
+    snprintf(cred, sizeof cred, "%s:%s", u, p);
+
+    if (g_auth && g_token[0] && ct_eq(cred, g_auth)) {
+        fails = 0;
+        char ck[200];
+        snprintf(ck, sizeof ck, "pd_auth=%s; Path=/; Max-Age=31536000; HttpOnly; SameSite=Strict", g_token);
+        send_redirect(fd, "/", ck);
+    } else {
+        if (++fails >= 5) { lock_until = now + 30; fails = 0; }
+        send_redirect(fd, "/?e=1", NULL);
+    }
+}
+
+/* Jeton de session = HMAC-SHA256(secret serveur, "user:pass"). Le secret est
+ * conservé dans ~/.config/polar_doctor/web_secret (0600) : les cookies survivent
+ * aux redémarrages et deviennent invalides dès que le mot de passe change.
+ * Supprimer ce fichier déconnecte tous les appareils. */
+static bool init_session_token(void)
+{
+    char secret[65] = "";
+    char *dir = g_build_filename(g_get_user_config_dir(), "polar_doctor", NULL);
+    char *path = g_build_filename(dir, "web_secret", NULL);
+    FILE *f = fopen(path, "r");
+    if (f) { if (!fgets(secret, sizeof secret, f)) secret[0] = 0; fclose(f); secret[strcspn(secret, "\r\n")] = 0; }
+    if (strlen(secret) < 64) {
+        unsigned char rnd[32]; int ok = 0;
+        int ufd = open("/dev/urandom", O_RDONLY);
+        if (ufd >= 0) { ok = (read(ufd, rnd, sizeof rnd) == (ssize_t)sizeof rnd); close(ufd); }
+        if (!ok) { fprintf(stderr, "polar_doctor_web : /dev/urandom illisible\n"); g_free(path); g_free(dir); return false; }
+        for (int i = 0; i < 32; i++) snprintf(secret + 2 * i, 3, "%02x", rnd[i]);
+        g_mkdir_with_parents(dir, 0700);
+        int wfd = open(path, O_WRONLY | O_CREAT | O_TRUNC, 0600);
+        if (wfd >= 0) { ssize_t w = write(wfd, secret, 64); (void)w; close(wfd); }
+        else fprintf(stderr, "polar_doctor_web : secret non enregistré (%s) : reconnexion à chaque redémarrage\n", path);
+    }
+    gchar *h = g_compute_hmac_for_string(G_CHECKSUM_SHA256, (const guchar *)secret, strlen(secret), g_auth, -1);
+    snprintf(g_token, sizeof g_token, "%s", h ? h : "");
+    g_free(h); g_free(path); g_free(dir);
+    return g_token[0] != 0;
+}
+
 /* --------------------------------------------------------------- client --- */
 static void handle_client(int fd)
 {
@@ -1170,8 +1282,6 @@ static void handle_client(int fd)
 
     char method[8] = "", path[256] = "";
     sscanf(req, "%7s %255s", method, path);
-
-    if (!authed(req)) { send_401(fd); return; }
 
     /* Corps (POST) : complète la lecture selon Content-Length. */
     char *hdr_end = strstr(req, "\r\n\r\n");
@@ -1192,6 +1302,20 @@ static void handle_client(int fd)
         }
     }
 
+    /* Accès : page de connexion / cookie de session (HTTP Basic accepté pour curl). */
+    int is_page = (strcmp(path, "/") == 0 || strncmp(path, "/?", 2) == 0);
+    if (strcmp(path, "/logout") == 0) {
+        send_redirect(fd, "/", "pd_auth=; Path=/; Max-Age=0; HttpOnly; SameSite=Strict");
+        return;
+    }
+    if (strcmp(method, "POST") == 0 && strcmp(path, "/login") == 0) { handle_login(fd, body ? body : ""); return; }
+    if (!authed(req)) {
+        if (strcmp(method, "GET") == 0 && is_page)
+            send_resp(fd, 200, "OK", "text/html; charset=utf-8", LOGIN, sizeof LOGIN - 1);
+        else send_401(fd);
+        return;
+    }
+
     if (strcmp(method, "POST") == 0) {
         if (strcmp(path, "/api/save") == 0 && body) serve_save(fd, body);
         else if (strcmp(path, "/api/config") == 0 && body) serve_config_post(fd, body);
@@ -1202,7 +1326,7 @@ static void handle_client(int fd)
     }
     if (strcmp(method, "GET") != 0) { send_text(fd, 400, "Bad Request", "text/plain", "400\n"); return; }
 
-    if (strcmp(path, "/") == 0)
+    if (is_page)
         send_resp(fd, 200, "OK", "text/html; charset=utf-8", PAGE, sizeof PAGE - 1);
     else if (strcmp(path, "/api/polar") == 0)
         serve_polar(fd);
@@ -1315,6 +1439,8 @@ int main(int argc, char **argv)
             bind_addr);
         return 2;
     }
+
+    if (g_auth && !init_session_token()) return 1;
 
     /* Sans chemin : POLAR_DOCTOR_BOAT, sinon le bateau le plus récent (service
      * systemd sans configuration : il rouvre le dernier bateau utilisé). */
