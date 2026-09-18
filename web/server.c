@@ -570,8 +570,13 @@ static void json_escape(const char *in, char *out, size_t cap)
     out[o] = '\0';
 }
 
-static int hexv(char c) { if (c >= '0' && c <= '9') return c - '0';
-    if (c >= 'a' && c <= 'f') return c - 'a' + 10; if (c >= 'A' && c <= 'F') return c - 'A' + 10; return -1; }
+static int hexv(char c)
+{
+    if (c >= '0' && c <= '9') return c - '0';
+    if (c >= 'a' && c <= 'f') return c - 'a' + 10;
+    if (c >= 'A' && c <= 'F') return c - 'A' + 10;
+    return -1;
+}
 
 /* Décode un composant d'URL (%XX et +) jusqu'à '&' ou fin. */
 static void url_decode(const char *in, char *out, size_t cap)
@@ -667,7 +672,8 @@ static bool append_polar_curves(char *buf, size_t cap, size_t *pn, PolarData *pd
 {
     size_t n = *pn; int w;
 #define APPC(...) do { w = snprintf(buf + n, cap - n, __VA_ARGS__); \
-    if (w < 0 || (size_t)w >= cap - n) return false; n += (size_t)w; } while (0)
+    if (w < 0 || (size_t)w >= cap - n) return false; \
+    n += (size_t)w; } while (0)
     int keep[MAX_SPEEDS], nk = 0;
     for (int s = 0; s < pd->num_speeds; s++)
         if (pd->tws_values[s] != 0) keep[nk++] = s;
@@ -873,10 +879,11 @@ static void serve_config_get(int fd)
 static void serve_config_post(int fd, char *body)
 {
     if (!g_boat_dir[0]) { send_text(fd, 400, "Bad Request", "application/json", "{\"ok\":false,\"err\":\"aucun bateau ouvert\"}"); return; }
-    char target[700];
-    if (g_boat_config_path[0]) snprintf(target, sizeof target, "%s", g_boat_config_path);
-    else snprintf(target, sizeof target, "%s/boat.cfg", g_boat_dir);
-    char tmp[720]; snprintf(tmp, sizeof tmp, "%s.tmp", target);
+    char target[BOAT_PATH_LEN];
+    int tl = g_boat_config_path[0] ? snprintf(target, sizeof target, "%s", g_boat_config_path)
+                                   : snprintf(target, sizeof target, "%s/boat.cfg", g_boat_dir);
+    if (tl < 0 || (size_t)tl >= sizeof target) { send_text(fd, 500, "Error", "application/json", "{\"ok\":false,\"err\":\"chemin trop long\"}"); return; }
+    char tmp[BOAT_PATH_LEN + 8]; snprintf(tmp, sizeof tmp, "%s.tmp", target);
 
     int fdw = g_open(tmp, O_WRONLY | O_CREAT | O_TRUNC | O_BINARY, 0644);
     if (fdw < 0) { send_text(fd, 500, "Error", "application/json", "{\"ok\":false}"); return; }
@@ -984,7 +991,7 @@ static char   g_acc[4096]; static size_t g_acclen = 0;  /* accumulateur de ligne
 static sqlite3 *g_vdr = NULL;              /* source VDR (tail) */
 static sqlite3_int64 g_vdr_last = 0;
 static int    g_vdr_has_sog = 0;
-static char   g_live_saved[600] = "";      /* chemin du .pol écrit au dernier arrêt */
+static char   g_live_saved[700] = "";      /* chemin du .pol écrit au dernier arrêt */
 
 /* Index de la définition de polaire (boat.cfg) correspondant à la polaire
  * sélectionnée, par nom de fichier. 0 par défaut. */
@@ -1209,7 +1216,7 @@ static void serve_live(int fd)
         int idx = (start + k) % LIVE_PTS;
         APP("%s[%.1f,%.2f]", k ? "," : "", g_lpt[idx][0], g_lpt[idx][1]);
     }
-    { char e[700]; json_escape(g_live_saved, e, sizeof e);
+    { char e[1400]; json_escape(g_live_saved, e, sizeof e);
       APP("],\"moteur\":%s,\"saved\":\"%s\",", g_live_moteur ? "true" : "false", e); }
     /* Polaire vivante : agrège la grille live (P90, min 3 pts) → courbes en cours. */
     {
@@ -1288,7 +1295,7 @@ static void serve_import(int fd, char *body, int update)
     int ok = (lp.num_angles >= 1 && lp.num_speeds >= 2 && save_polar_file(path, &lp));
     if (ok) {
         PolarData t; init_polar_data(&t);
-        if (load_polar_file(path, &t)) { g_polar = t; snprintf(g_polar.filename, sizeof g_polar.filename, "%s", path); g_loaded = 1; }
+        if (load_polar_file(path, &t)) { g_polar = t; snprintf(g_polar.filename, sizeof g_polar.filename, "%.*s", (int)sizeof g_polar.filename - 1, path); g_loaded = 1; }
         rescan_boat();
         for (int i = 0; i < g_npol; i++) if (strcmp(g_pol_paths[i], path) == 0) { g_cur = i; break; }
     }
