@@ -117,7 +117,7 @@ rouvre automatiquement le dernier bateau utilisé.
 ## 🚀 Lancer à la main
 
 ```
-polar_doctor_web [dossier-bateau | fichier.pol] [--port N] [--bind ADDR] [--allow-anonymous]
+polar_doctor_web [dossier-bateau | fichier.pol] [--port N] [--bind ADDR] [--config FICHIER] [--allow-anonymous]
 ```
 
 | Option | Rôle |
@@ -125,6 +125,7 @@ polar_doctor_web [dossier-bateau | fichier.pol] [--port N] [--bind ADDR] [--allo
 | *dossier-bateau* | bateau ouvert au démarrage (sinon `POLAR_DOCTOR_BOAT`, sinon le plus récent) |
 | `--port N` | port d'écoute (défaut **8081**) |
 | `--bind ADDR` | adresse d'écoute (défaut `127.0.0.1` ; `0.0.0.0` = accessible depuis le réseau) |
+| `--config FICHIER` | fichier de réglages (défaut `web.conf`, voir [Où mettre le mot de passe ?](#où-mettre-le-mot-de-passe-)) |
 | `--allow-anonymous` | autorise l'écoute réseau **sans** mot de passe (déconseillé) |
 
 ## 🔐 Accès et sécurité
@@ -140,45 +141,43 @@ du serveur. Donc :
 
 ### Où mettre le mot de passe ?
 
-Le serveur le lit dans la **variable d'environnement** `WEB_AUTH` (au format
-`utilisateur:motdepasse`), jamais sur la ligne de commande. Il n'y a pas de fichier de
-configuration propre à Polar Doctor : c'est le moyen de lancement qui fournit la variable.
+Toujours sous la forme `WEB_AUTH=utilisateur:motdepasse`, **jamais sur la ligne de commande**.
 
-**Linux, en service systemd** — dans le fichier **`/etc/default/polar_doctor_web`** (créé par
+**Windows** — dans le fichier **`%LOCALAPPDATA%\polar_doctor\web.conf`**. Au premier lancement,
+le serveur le crée, tout commenté, et affiche son chemin. Pour l'ouvrir : touche Windows + R,
+`notepad %LOCALAPPDATA%\polar_doctor\web.conf`, puis enlever le `#` des lignes utiles :
+
+```ini
+WEB_AUTH=moi:MonMotDePasse
+BIND=0.0.0.0
+```
+
+Relancer `polar_doctor_web.exe` : il écoute sur le réseau avec ce mot de passe. Le dossier
+`%LOCALAPPDATA%` n'est accessible qu'à votre compte (et aux administrateurs). Au premier lancement réseau, le
+pare-feu Windows demande d'autoriser le programme.
+
+**Linux, en service systemd** — dans **`/etc/default/polar_doctor_web`** (créé par
 `sudo make install`, ou copié depuis `polar_doctor_web.default` de l'archive), lisible par root
-seul :
+seul. Le service écoute déjà sur le réseau :
 
 ```bash
-sudo nano /etc/default/polar_doctor_web
-#   WEB_AUTH=moi:MonMotDePasse      (le service écoute déjà sur le réseau)
+sudo nano /etc/default/polar_doctor_web     # WEB_AUTH=moi:MonMotDePasse
 sudo systemctl restart polar_doctor_web
 ```
 
-**Linux, lancé à la main** — dans le terminal, sans que le mot de passe reste dans l'historique :
+**Linux, lancé à la main** — dans **`~/.config/polar_doctor/web.conf`** (même format que sous
+Windows, à créer, `chmod 600` exigé : le serveur refuse un fichier lisible par d'autres).
 
-```bash
-read -rsp 'Mot de passe : ' P; echo
-WEB_AUTH="moi:$P" ./polar_doctor_web ~/MonBateau --bind 0.0.0.0
-```
+Autres possibilités, sur les deux systèmes : `--config FICHIER` pour un autre emplacement, ou la
+variable d'environnement `WEB_AUTH`. En cas de réglages multiples, l'ordre de priorité est
+**ligne de commande > variable d'environnement > `web.conf`**.
 
-**Windows** — pas de fichier non plus ; la variable se pose avant de lancer l'exécutable :
-
-```bat
-:: Invite de commandes (cmd), pour cette fenêtre seulement
-set "WEB_AUTH=moi:MonMotDePasse"
-polar_doctor_web.exe C:\Bateaux\MonBateau --bind 0.0.0.0
-```
-
-```powershell
-# PowerShell, pour cette fenêtre seulement
-$env:WEB_AUTH = "moi:MonMotDePasse"
-.\polar_doctor_web.exe C:\Bateaux\MonBateau --bind 0.0.0.0
-```
-
-Pour ne pas la retaper : `setx WEB_AUTH "moi:MonMotDePasse"` l'enregistre pour votre compte
-Windows (en clair dans votre profil ; prise en compte dans les **nouvelles** fenêtres). On peut
-aussi mettre les deux lignes `set` + lancement dans un fichier `.bat` à côté de l'exécutable.
-Au premier lancement réseau, le pare-feu Windows demande d'autoriser le programme.
+| Clé de `web.conf` | Rôle | Défaut |
+|-------------------|------|--------|
+| `WEB_AUTH` | `utilisateur:motdepasse` (obligatoire hors `127.0.0.1`) | — |
+| `BIND` | adresse d'écoute (`0.0.0.0` = réseau) | `127.0.0.1` |
+| `PORT` | port d'écoute | `8081` |
+| `POLAR_DOCTOR_BOAT` | bateau ouvert au démarrage | le plus récent |
 
 ## 📊 Format des fichiers
 

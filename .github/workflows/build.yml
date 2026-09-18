@@ -145,6 +145,17 @@ jobs:
         curl -fsS -o /dev/null http://127.0.0.1:18080/
         kill $PID 2>/dev/null || taskkill //F //IM polar_doctor_web.exe
 
+    - name: Test web.conf (modèle créé, mot de passe lu)
+      run: |
+        CONF="$(cygpath -u "$LOCALAPPDATA")/polar_doctor/web.conf"
+        test -f "$CONF" && grep -q '^#WEB_AUTH=' "$CONF"
+        printf 'WEB_AUTH=ci:test\r\nPORT=18081\r\n' > "$CONF"
+        ./polar_doctor_web.exe & PID=$!
+        sleep 2
+        test "$(curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:18081/api/polar)" = 401
+        curl -fsS -u ci:test -o /dev/null http://127.0.0.1:18081/api/polar
+        kill $PID 2>/dev/null || taskkill //F //IM polar_doctor_web.exe
+
     - name: Create package (exe + DLL)
       run: |
         mkdir -p dist/polar_doctor_win
@@ -249,13 +260,9 @@ jobs:
           2. Lancer `polar_doctor_web.exe C:\chemin\MonBateau`
           3. Ouvrir http://localhost:8081
 
-          Pour un accès depuis le réseau, un mot de passe est obligatoire. Dans l'invite
-          de commandes, dans le dossier extrait :
-          ```bat
-          set "WEB_AUTH=utilisateur:motdepasse"
-          polar_doctor_web.exe C:\chemin\MonBateau --bind 0.0.0.0
-          ```
-          PowerShell, `setx`, fichier `.bat` : voir le README, section « Où mettre le mot de passe ? ».
+          Pour un accès depuis le réseau, ouvrir le fichier de réglages créé au premier
+          lancement (Windows + R) : `notepad %LOCALAPPDATA%\polar_doctor\web.conf`, et
+          décommenter `WEB_AUTH=utilisateur:motdepasse` et `BIND=0.0.0.0`, puis relancer.
 
           ## 🔐 Vérification des fichiers
           ```bash

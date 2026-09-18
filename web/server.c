@@ -1370,6 +1370,99 @@ static bool init_session_token(void)
     return g_token[0] != 0;
 }
 
+/* ------------------------------------------------------------- web.conf --- */
+/* Fichier de réglages du serveur, surtout pour Windows (pas de systemd ni de
+ * /etc/default) : <config utilisateur>/polar_doctor/web.conf, soit
+ * %LOCALAPPDATA%\polar_doctor\web.conf sous Windows et ~/.config/polar_doctor/web.conf
+ * sous Linux, ou --config FICHIER. Format de /etc/default : CLÉ=valeur, # = commentaire.
+ * Priorité : ligne de commande > environnement > web.conf. */
+static char g_conf_auth[AUTH_RAW_MAX + 2];
+static char g_conf_bind[64];
+static char g_conf_boat[BOAT_PATH_LEN];
+static int  g_conf_port;
+
+#ifdef _WIN32
+static const char CONF_TEMPLATE[] =
+    "# Réglages de polar_doctor_web (une ligne CLÉ=valeur, # = commentaire).\n"
+    "# Priorité : ligne de commande > variables d'environnement > ce fichier.\n"
+    "\n"
+    "# Identifiants utilisateur:motdepasse. OBLIGATOIRES pour écouter sur le réseau.\n"
+    "#WEB_AUTH=moi:MonMotDePasse\n"
+    "\n"
+    "# Adresse d'écoute : 127.0.0.1 = ce PC seulement, 0.0.0.0 = tout le réseau.\n"
+    "#BIND=0.0.0.0\n"
+    "\n"
+    "# Port d'écoute (défaut 8081).\n"
+    "#PORT=8081\n"
+    "\n"
+    "# Bateau ouvert au démarrage (défaut : le plus récent).\n"
+    "#POLAR_DOCTOR_BOAT=C:\\Bateaux\\MonBateau\n";
+#endif
+
+/* Lit web.conf. false = fichier illisible ou invalide (message déjà affiché).
+ * Absent : true, et sous Windows un modèle commenté est créé pour qu'on le trouve. */
+static bool load_web_conf(const char *path, bool explicit_path)
+{
+    gchar *txt = NULL; gsize len = 0;
+    if (!g_file_get_contents(path, &txt, &len, NULL)) {
+        if (explicit_path) { fprintf(stderr, "polar_doctor_web : impossible de lire %s\n", path); return false; }
+#ifdef _WIN32
+        if (!g_file_test(path, G_FILE_TEST_EXISTS)) {
+            gchar *dir = g_path_get_dirname(path);
+            g_mkdir_with_parents(dir, 0700); g_free(dir);
+            if (g_file_set_contents(path, CONF_TEMPLATE, -1, NULL))
+                fprintf(stderr, "polar_doctor_web : modèle de réglages créé : %s\n", path);
+        }
+#endif
+        return true;
+    }
+    bool ok = true, has_auth = false;
+    int ln = 0;
+    for (char *line = txt, *next; line; line = next) {
+        next = strchr(line, '\n');
+        if (next) *next++ = 0;
+        ln++;
+        g_strstrip(line);                                   /* espaces, \r (CRLF), tabulations */
+        if (ln == 1 && (unsigned char)line[0] == 0xEF && (unsigned char)line[1] == 0xBB && (unsigned char)line[2] == 0xBF)
+            memmove(line, line + 3, strlen(line + 3) + 1); /* BOM UTF-8 (Bloc-notes) */
+        if (!line[0] || line[0] == '#') continue;
+        char *eq = strchr(line, '=');
+        if (!eq) { fprintf(stderr, "%s:%d : ligne ignorée (CLÉ=valeur attendu)\n", path, ln); continue; }
+        *eq = 0;
+        char *key = g_strstrip(line), *val = g_strstrip(eq + 1);
+        size_t vl = strlen(val);
+        if (vl >= 2 && (val[0] == '"' || val[0] == '\'') && val[vl - 1] == val[0]) { val[vl - 1] = 0; val++; }
+        if (strcmp(key, "WEB_AUTH") == 0 || strcmp(key, "POLAR_DOCTOR_WEB_AUTH") == 0) {
+            if (strlen(val) > AUTH_RAW_MAX) { fprintf(stderr, "%s:%d : WEB_AUTH trop long (max %d)\n", path, ln, AUTH_RAW_MAX); ok = false; }
+            else { snprintf(g_conf_auth, sizeof g_conf_auth, "%s", val); has_auth = val[0] != 0; }
+        } else if (strcmp(key, "BIND") == 0) {
+            snprintf(g_conf_bind, sizeof g_conf_bind, "%s", val);
+        } else if (strcmp(key, "PORT") == 0) {
+            char *end; long p = strtol(val, &end, 10);
+            if (!val[0] || *end || p < 1 || p > 65535) { fprintf(stderr, "%s:%d : PORT invalide : %s\n", path, ln, val); ok = false; }
+            else g_conf_port = (int)p;
+        } else if (strcmp(key, "POLAR_DOCTOR_BOAT") == 0) {
+            snprintf(g_conf_boat, sizeof g_conf_boat, "%s", val);
+        } else {
+            fprintf(stderr, "%s:%d : clé inconnue ignorée : %s\n", path, ln, key);
+        }
+    }
+    g_free(txt);
+#ifndef _WIN32
+    /* Le fichier porte un mot de passe : même exigence que ssh sur ses clés. */
+    struct stat st;
+    if (has_auth && g_stat(path, &st) == 0 && (st.st_mode & 077)) {
+        fprintf(stderr, "polar_doctor_web : %s contient WEB_AUTH mais est lisible par d'autres "
+                        "utilisateurs : chmod 600 %s\n", path, path);
+        ok = false;
+    }
+#else
+    (void)has_auth;
+#endif
+    if (ok) fprintf(stderr, "polar_doctor_web : réglages lus dans %s\n", path);
+    return ok;
+}
+
 /* --------------------------------------------------------------- client --- */
 static void handle_client(int fd)
 {
@@ -1497,36 +1590,53 @@ static void handle_client(int fd)
 
 int main(int argc, char **argv)
 {
-    int port = 8081;   /* 8080 est pris par n2k-mux-web */
-    const char *bind_addr = "127.0.0.1";
+    int port = 0;                  /* 0 = non fixé : web.conf, sinon 8081 (8080 = n2k-mux-web) */
+    const char *bind_addr = NULL;  /* NULL = non fixé : web.conf, sinon 127.0.0.1 */
     const char *pol = NULL;
+    const char *conf_path = NULL;  /* --config FICHIER */
     int allow_anon = 0;   /* --allow-anonymous : écoute réseau sans auth, assumée */
 
     for (int i = 1; i < argc; i++) {
         if (strcmp(argv[i], "--port") == 0 && i + 1 < argc) port = atoi(argv[++i]);
         else if (strcmp(argv[i], "--bind") == 0 && i + 1 < argc) bind_addr = argv[++i];
         else if (strcmp(argv[i], "--auth") == 0 && i + 1 < argc) g_auth = argv[++i];
+        else if (strcmp(argv[i], "--config") == 0 && i + 1 < argc) conf_path = argv[++i];
         else if (strcmp(argv[i], "--allow-anonymous") == 0) allow_anon = 1;
         else if (strcmp(argv[i], "-h") == 0 || strcmp(argv[i], "--help") == 0) {
+            gchar *def_conf = g_build_filename(g_get_user_config_dir(), "polar_doctor", "web.conf", NULL);
             fprintf(stderr,
-                "Usage : %s [fichier.pol | dossier-bateau] [--port N] [--bind ADDR] [--auth user:pass]\n"
+                "Usage : %s [fichier.pol | dossier-bateau] [--port N] [--bind ADDR] [--config FICHIER]\n"
                 "  --port N     port d'écoute (défaut 8081 ; 8080 = n2k-mux-web)\n"
                 "  --bind ADDR  adresse d'écoute (défaut 127.0.0.1 ; 0.0.0.0 = LAN)\n"
                 "  --auth u:p   authentification HTTP Basic (préférer l'environnement :\n"
                 "               POLAR_DOCTOR_WEB_AUTH ou WEB_AUTH — argv est lisible via /proc)\n"
+                "  --config F   fichier de réglages (défaut : %s)\n"
                 "  --allow-anonymous  autorise l'écoute réseau SANS authentification\n"
-                "  Sans chemin : POLAR_DOCTOR_BOAT, sinon le bateau le plus récent.\n", argv[0]);
+                "  Sans chemin : POLAR_DOCTOR_BOAT, sinon le bateau le plus récent.\n",
+                argv[0], def_conf);
+            g_free(def_conf);
             return 0;
         } else if (argv[i][0] != '-') pol = argv[i];
         else { fprintf(stderr, "option inconnue : %s\n", argv[i]); return 2; }
     }
 
-    /* Le credential peut venir de l'environnement plutôt que de la ligne de
-     * commande : argv est lisible par tout utilisateur local via /proc. */
+    /* Réglages : ligne de commande > environnement > web.conf > défauts. */
+    {
+        gchar *def_conf = g_build_filename(g_get_user_config_dir(), "polar_doctor", "web.conf", NULL);
+        bool ok = load_web_conf(conf_path ? conf_path : def_conf, conf_path != NULL);
+        g_free(def_conf);
+        if (!ok) return 2;
+    }
+    if (!port) port = g_conf_port ? g_conf_port : 8081;
+    if (!bind_addr) bind_addr = g_conf_bind[0] ? g_conf_bind : "127.0.0.1";
+
+    /* Le credential peut venir de l'environnement ou de web.conf plutôt que de la
+     * ligne de commande : argv est lisible par tout utilisateur local via /proc. */
     if (!g_auth) {
         const char *env = getenv("POLAR_DOCTOR_WEB_AUTH");
         if (!env || !env[0]) env = getenv("WEB_AUTH");   /* /etc/default/polar_doctor_web */
         if (env && env[0]) g_auth = env;
+        else if (g_conf_auth[0]) g_auth = g_conf_auth;
     }
     if (g_auth) {
         if (!strchr(g_auth, ':')) { fprintf(stderr, "--auth attend le format user:pass\n"); return 2; }
@@ -1544,7 +1654,12 @@ int main(int argc, char **argv)
         strcmp(bind_addr, "::1") != 0 && strcmp(bind_addr, "localhost") != 0) {
         fprintf(stderr,
             "polar_doctor_web : refus d'écouter sur %s sans authentification.\n"
-            "  Poser WEB_AUTH=user:pass dans /etc/default/polar_doctor_web,\n"
+#ifdef _WIN32
+            "  Poser WEB_AUTH=user:pass dans %%LOCALAPPDATA%%\\polar_doctor\\web.conf,\n"
+#else
+            "  Poser WEB_AUTH=user:pass dans /etc/default/polar_doctor_web (service)\n"
+            "  ou ~/.config/polar_doctor/web.conf,\n"
+#endif
             "  ou --bind 127.0.0.1, ou --allow-anonymous pour assumer le risque.\n",
             bind_addr);
         return 2;
@@ -1558,6 +1673,7 @@ int main(int argc, char **argv)
     if (!pol) {
         const char *eb = getenv("POLAR_DOCTOR_BOAT");
         if (eb && eb[0]) pol = eb;
+        else if (g_conf_boat[0]) pol = g_conf_boat;
         else if (boat_recent_load(recent0, BOAT_RECENT_MAX) > 0) pol = recent0[0];
     }
 

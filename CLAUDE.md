@@ -20,8 +20,10 @@ sudo make install                      # binary + systemd service (see web/polar
 
 - Default port **8081** (8080 is n2k-mux-web on the target machine). Test on another port
   and never kill a process you did not start.
-- Listening on a non-loopback address requires credentials (`WEB_AUTH=user:pass` in the
-  environment, or `--allow-anonymous`).
+- Listening on a non-loopback address requires credentials (`WEB_AUTH=user:pass`) or
+  `--allow-anonymous`. Settings precedence: command line > environment > `web.conf`
+  (`g_get_user_config_dir()/polar_doctor/web.conf`, i.e. `%LOCALAPPDATA%` on Windows where a
+  commented template is created on first run; `--config FILE`; must be 0600 on POSIX).
 - The UI JavaScript lives in C string literals in `web/server.c`: after editing it, extract the
   `<script>` from the served page and run `node --check` on it. French text with apostrophes
   goes in backtick template literals (help) or uses `’`; `\n` inside JS strings is `\\n` in C.

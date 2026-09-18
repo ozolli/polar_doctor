@@ -2,6 +2,18 @@
 
 Toutes les modifications notables du projet seront documentées dans ce fichier.
 
+## [Non publié]
+
+### Ajouté
+- ✅ **Fichier de réglages `web.conf`** (`WEB_AUTH`, `BIND`, `PORT`, `POLAR_DOCTOR_BOAT`) :
+  `%LOCALAPPDATA%\polar_doctor\web.conf` sous Windows (modèle commenté créé au premier
+  lancement), `~/.config/polar_doctor/web.conf` sous Linux (`chmod 600` exigé), ou
+  `--config FICHIER`. Priorité : ligne de commande > environnement > `web.conf`.
+
+### Corrigé
+- 🐛 Zéro warning de compilation ; `/api/config` refuse un chemin de `boat.cfg` trop long au
+  lieu de le tronquer.
+
 ## [2.0.0] - 2026-09-18
 
 Polar Doctor devient une **application web**. L'interface GTK est retirée : un serveur
