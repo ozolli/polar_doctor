@@ -66,8 +66,12 @@ fichiers de log (onglet *Données*) ou **capturer en direct** (carte *Live*) →
   cocher ; un critère absent de l'inventaire est signalé
 
 ### Capture live
-- ✅ Sources **NMEA UDP**, **NMEA TCP** ou **VDR qtVlm** (suivi de `vdr.db`) — le **NMEA2000**
-  s'utilise via une passerelle qui le traduit en 0183 (n2k-mux, kplex, Actisense NGX-1…)
+- ✅ Sources **NMEA0183 UDP**, **NMEA0183 TCP** ou **VDR qtVlm** (suivi de `vdr.db`)
+- ⚠️ Pas de lecture **NMEA2000** native : il faut une passerelle qui publie le N2K en **0183 sur
+  le réseau** — logicielle ([n2k-mux](https://github.com/ozolli/n2k-mux), port TCP 10110) ou
+  Wi-Fi (Yacht Devices YDWG-02…). Une passerelle **série/USB** (Actisense NGX-1, Yacht Devices
+  YDNG-03…) doit en plus être relayée sur le réseau, par exemple avec kplex. Autre voie : laisser
+  qtVlm lire le N2K et capter son **VDR**
 - ✅ **État du bateau en direct** (grand-voile, voile d'avant, mer) : chaque point est routé vers
   **toutes** les polaires dont les critères correspondent ; bouton **Moteur**
 - ✅ Nuage de points, point courant et **polaire qui se construit en direct**
