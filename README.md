@@ -69,8 +69,9 @@ fichiers de log (onglet *Données*) ou **capturer en direct** (carte *Live*) →
 ### Capture live
 - ✅ Sources **UDP**, **TCP** ou **VDR qtVlm** (suivi de `vdr.db`). En UDP/TCP, le format est
   reconnu ligne par ligne : **NMEA 0183** ou **NMEA 2000** au format texte **YDRAW** — directement
-  depuis [n2k-mux](https://github.com/ozolli/n2k-mux) (port TCP **2700**) ou une passerelle
-  réseau Yacht Devices (YDWG-02…)
+  depuis [n2k-mux](https://github.com/ozolli/n2k-mux) (port TCP **2700**) — qui lit lui-même un
+  adaptateur CAN (socketcan) ou une passerelle **Actisense NGX-1/NGT-1** — ou depuis une
+  passerelle réseau Yacht Devices (YDWG-02…)
 - ✅ **État du bateau en direct** (grand-voile, voile d'avant, mer) : chaque point est routé vers
   **toutes** les polaires dont les critères correspondent ; bouton **Moteur**
 - ✅ Nuage de points, point courant et **polaire qui se construit en direct**
@@ -278,8 +279,10 @@ C'est ce que publient n2k-mux (TCP 2700) et les passerelles/enregistreurs Yacht 
 09:30:59.677 R 09F50305 FF A6 03 FF FF 00 FF FF     STW 9,34 m/s
 ```
 
-Une passerelle N2K **série/USB** (Actisense NGX-1…) ne publie pas de YDRAW : la configurer en
-sortie 0183 et relayer ce 0183 sur le réseau (kplex…).
+Une passerelle N2K **série/USB** (Actisense NGX-1/NGT-1) ne publie pas de YDRAW elle-même : la
+passer par **n2k-mux** (NGX-1 en mode **Transfer**, sortie YDRAW sur le port 2700 par
+`ydraw-bridge`), qui arbitre en plus les sources en double. À défaut, sortie 0183 de la
+passerelle relayée sur le réseau (kplex…).
 
 ### Fichiers VDR (qtVlm)
 
