@@ -397,6 +397,77 @@ bool parse_ydraw_line(const char *line, nmea_data_t *data) {
     return n2k_apply_frame(n2k_pgn_from_id((uint32_t)id), d, len, data);
 }
 
+/* ------------------------------------------------- passerelle Actisense --- */
+/* Protocole série des passerelles Actisense NGT-1 / NGX-1 (mode Transfer), repris
+ * de canboat/actisense-serial : trames DLE STX <commande> <longueur> <données>
+ * <somme> DLE ETX, un DLE dans le contenu étant doublé ; la somme de tous les
+ * octets de <commande> à <somme> vaut 0 (mod 256). Commande 0x93 = message N2K
+ * reçu, déjà réassemblé par la passerelle : priorité, PGN (3 octets LE),
+ * destination, source, horodatage (4), longueur, données. */
+#define ACT_DLE 0x10
+#define ACT_STX 0x02
+#define ACT_ETX 0x03
+#define ACT_N2K_RECEIVED 0x93
+enum { ACT_START, ACT_MESSAGE, ACT_ESCAPE };
+
+void actisense_rx_reset(actisense_rx_t *r) { r->n = 0; r->state = ACT_START; r->prev = ACT_START; }
+
+// Commande « NGT » 0xA1 11 02 00 : vide la liste de PGN filtrés de la passerelle,
+// qui émet alors tous les PGN (rétro-ingénierie canboat, renvoyée toutes les 20 s).
+size_t actisense_startup_frame(uint8_t *out, size_t cap) {
+    static const uint8_t body[] = { 0xA1, 3, 0x11, 0x02, 0x00 };
+    uint8_t sum = 0;
+    size_t o = 0;
+    if (cap < 2 * (sizeof body + 1) + 4) return 0;
+    out[o++] = ACT_DLE; out[o++] = ACT_STX;
+    for (size_t i = 0; i <= sizeof body; i++) {
+        uint8_t b = (i < sizeof body) ? body[i] : (uint8_t)(0x100 - sum);
+        if (i < sizeof body) sum += b;
+        if (b == ACT_DLE) out[o++] = ACT_DLE;
+        out[o++] = b;
+    }
+    out[o++] = ACT_DLE; out[o++] = ACT_ETX;
+    return o;
+}
+
+/* Un octet du flux série. true quand il termine un message N2K valide : *pgn,
+ * *data (pointe dans r->buf, valable jusqu'au prochain appel) et *len. */
+bool actisense_rx_byte(actisense_rx_t *r, uint8_t c, int *pgn, const uint8_t **data, int *len) {
+    if (r->state == ACT_ESCAPE) {
+        if (c == ACT_ETX) {
+            r->state = ACT_START;
+            size_t n = r->n;
+            if (n < 3 || r->buf[0] != ACT_N2K_RECEIVED) return false;
+            uint8_t sum = 0;
+            for (size_t i = 0; i < n; i++) sum += r->buf[i];
+            if (sum != 0) return false;                        // somme invalide
+            size_t plen = r->buf[1];
+            const uint8_t *m = r->buf + 2;
+            if (plen < 11 || plen + 3 > n) return false;       // en-tête 0x93 incomplet
+            size_t dlen = m[10];
+            if (dlen > plen - 11) dlen = plen - 11;
+            *pgn = (int)(m[1] | (m[2] << 8) | ((unsigned)m[3] << 16));
+            *data = m + 11;
+            *len = (int)dlen;
+            return true;
+        }
+        if (c == ACT_STX) { r->n = 0; r->state = ACT_MESSAGE; return false; }
+        if (c == ACT_DLE) {                                    // DLE doublé = octet 0x10
+            if (r->prev == ACT_MESSAGE && r->n < sizeof r->buf) r->buf[r->n++] = c;
+            r->state = r->prev;
+            return false;
+        }
+        r->state = ACT_START;                                  // séquence invalide : resynchro
+        return false;
+    }
+    if (c == ACT_DLE) { r->prev = r->state; r->state = ACT_ESCAPE; return false; }
+    if (r->state == ACT_MESSAGE) {
+        if (r->n < sizeof r->buf) r->buf[r->n++] = c;
+        else r->state = ACT_START;                             // trop long : on abandonne
+    }
+    return false;
+}
+
 /* Une ligne d'un flux ou d'un fichier de navigation : NMEA 0183 ($…) ou N2K YDRAW. */
 bool parse_nav_line(const char *line, nmea_data_t *data) {
     const char *p = line;

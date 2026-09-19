@@ -39,6 +39,7 @@
 #  include <sys/socket.h>
 #  include <netinet/in.h>
 #  include <arpa/inet.h>
+#  include <termios.h>
 #  define sock_close close
 #endif
 #ifndef O_BINARY
@@ -75,6 +76,119 @@ static void sock_timeouts(int fd, int sec)
     struct timeval tv = { .tv_sec = sec, .tv_usec = 0 };
     setsockopt(fd, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof tv);
     setsockopt(fd, SOL_SOCKET, SO_SNDTIMEO, &tv, sizeof tv);
+#endif
+}
+
+/* ------------------------------------------------------------ port série ---
+ * Passerelle Actisense NGX-1/NGT-1 : 8N1, sans contrôle de flux, lecture non
+ * bloquante (la boucle poll() relève le port toutes les 50 ms). Spécification
+ * « périphérique[@débit] » : /dev/ttyUSB0, /dev/serial/by-id/…, COM3, COM12@230400.
+ * Débit par défaut 115200 (NGX-1 en sortie d'usine). */
+#ifdef _WIN32
+#  define SERIAL_DEFAULT "COM3"
+static HANDLE g_ser = INVALID_HANDLE_VALUE;
+#else
+#  define SERIAL_DEFAULT "/dev/ttyUSB0"
+static int g_ser = -1;
+#endif
+
+static void serial_close(void)
+{
+#ifdef _WIN32
+    if (g_ser != INVALID_HANDLE_VALUE) CloseHandle(g_ser);
+    g_ser = INVALID_HANDLE_VALUE;
+#else
+    if (g_ser >= 0) close(g_ser);
+    g_ser = -1;
+#endif
+}
+
+/* Ouvre le port ; false + message dans err en cas d'échec. */
+static bool serial_open(const char *spec, char *err, size_t errsz)
+{
+    char dev[160]; long baud = 115200;
+    snprintf(dev, sizeof dev, "%s", spec);
+    char *at = strrchr(dev, '@');
+    if (at) { *at = 0; baud = strtol(at + 1, NULL, 10); }
+    if (!dev[0]) { snprintf(err, errsz, "port série non précisé"); return false; }
+    serial_close();
+#ifdef _WIN32
+    char path[180];
+    if (strncmp(dev, "\\\\.\\", 4) == 0) snprintf(path, sizeof path, "%s", dev);
+    else snprintf(path, sizeof path, "\\\\.\\%s", dev);        /* \\.\COM12 : obligatoire au-delà de COM9 */
+    wchar_t *w = g_utf8_to_utf16(path, -1, NULL, NULL, NULL);
+    g_ser = w ? CreateFileW(w, GENERIC_READ | GENERIC_WRITE, 0, NULL, OPEN_EXISTING, 0, NULL) : INVALID_HANDLE_VALUE;
+    g_free(w);
+    if (g_ser == INVALID_HANDLE_VALUE) {
+        DWORD e = GetLastError();
+        snprintf(err, errsz, "%.100s : %s", dev, e == ERROR_FILE_NOT_FOUND ? "port inexistant"
+                 : e == ERROR_ACCESS_DENIED ? "port déjà utilisé par un autre programme" : "ouverture impossible");
+        return false;
+    }
+    SetupComm(g_ser, 65536, 4096);                   /* tampon d'entrée large : relevé toutes les 50 ms */
+    DCB dcb = { .DCBlength = sizeof dcb };
+    GetCommState(g_ser, &dcb);
+    dcb.BaudRate = (DWORD)baud; dcb.ByteSize = 8; dcb.Parity = NOPARITY; dcb.StopBits = ONESTOPBIT;
+    dcb.fBinary = TRUE; dcb.fParity = FALSE; dcb.fOutxCtsFlow = FALSE; dcb.fOutxDsrFlow = FALSE;
+    dcb.fDtrControl = DTR_CONTROL_ENABLE; dcb.fRtsControl = RTS_CONTROL_ENABLE;
+    dcb.fOutX = FALSE; dcb.fInX = FALSE; dcb.fNull = FALSE; dcb.fAbortOnError = FALSE;
+    COMMTIMEOUTS to = { .ReadIntervalTimeout = MAXDWORD, .WriteTotalTimeoutConstant = 500 };  /* lecture immédiate */
+    if (!SetCommState(g_ser, &dcb) || !SetCommTimeouts(g_ser, &to)) {
+        snprintf(err, errsz, "%.100s : réglage à %ld bauds refusé", dev, baud);
+        serial_close(); return false;
+    }
+    PurgeComm(g_ser, PURGE_RXCLEAR);
+#else
+    speed_t sp;
+    switch (baud) {
+    case 38400: sp = B38400; break;
+    case 57600: sp = B57600; break;
+    case 115200: sp = B115200; break;
+    case 230400: sp = B230400; break;
+#  ifdef B460800
+    case 460800: sp = B460800; break;
+#  endif
+    default: snprintf(err, errsz, "débit non géré : %ld (38400, 57600, 115200, 230400, 460800)", baud); return false;
+    }
+    g_ser = open(dev, O_RDWR | O_NOCTTY | O_NONBLOCK);
+    if (g_ser < 0) {
+        snprintf(err, errsz, "%.100s : %s%s", dev, strerror(errno),
+                 errno == EACCES ? " (ajouter l'utilisateur du serveur au groupe dialout)" : "");
+        return false;
+    }
+    struct termios t;
+    if (tcgetattr(g_ser, &t) != 0) { snprintf(err, errsz, "%.100s : pas un port série", dev); serial_close(); return false; }
+    cfmakeraw(&t);
+    t.c_cflag |= CLOCAL | CREAD;
+    t.c_cflag &= ~(tcflag_t)(CSTOPB | PARENB | CRTSCTS);
+    cfsetispeed(&t, sp); cfsetospeed(&t, sp);
+    tcflush(g_ser, TCIFLUSH);
+    if (tcsetattr(g_ser, TCSANOW, &t) != 0) { snprintf(err, errsz, "%.100s : réglage refusé", dev); serial_close(); return false; }
+#endif
+    return true;
+}
+
+/* Lecture non bloquante : >0 octets lus, 0 rien de disponible, -1 port perdu. */
+static long serial_read(uint8_t *buf, size_t cap)
+{
+#ifdef _WIN32
+    DWORD got = 0;
+    if (!ReadFile(g_ser, buf, (DWORD)cap, &got, NULL)) return -1;
+    return (long)got;
+#else
+    ssize_t r = read(g_ser, buf, cap);
+    if (r > 0) return (long)r;
+    if (r < 0 && (errno == EAGAIN || errno == EWOULDBLOCK || errno == EINTR)) return 0;
+    return -1;                                      /* 0 = fin de fichier : adaptateur débranché */
+#endif
+}
+
+static void serial_write(const uint8_t *buf, size_t len)
+{
+#ifdef _WIN32
+    DWORD w = 0; WriteFile(g_ser, buf, (DWORD)len, &w, NULL);
+#else
+    ssize_t w = write(g_ser, buf, len); (void)w;
 #endif
 }
 
@@ -217,8 +331,8 @@ static const char PAGE[] =
 "<label><span data-i18n='tws1'>TWS</span> <input type=number id='dtws' value='10' min='0' step='0.5' style='width:5em'> <span data-i18n='kn'>nœuds</span></label>\n"
 "<div id='read' style='font-size:.85em;margin-top:.4em'></div></div>\n"
 "<div class='card'><h3 data-i18n='live'>Live</h3>\n"
-"<label><span data-i18n='source'>Source</span> <select id='lvsrc'><option value='udp'>UDP (0183 / N2K)</option><option value='tcp'>TCP (0183 / N2K)</option><option value='vdr'>VDR qtVlm</option></select></label>\n"
-"<label><input id='lvaddr' value='10110' style='width:9em' title='UDP: port · TCP: hôte:port · VDR: chemin .db'></label>\n"
+"<label><span data-i18n='source'>Source</span> <select id='lvsrc'><option value='udp'>UDP (0183 / N2K)</option><option value='tcp'>TCP (0183 / N2K)</option><option value='vdr'>VDR qtVlm</option><option value='ngx'>Actisense NGX-1 (série)</option></select></label>\n"
+"<label><input id='lvaddr' value='10110' style='width:9em' title='UDP: port · TCP: hôte:port · VDR: chemin .db · NGX-1: port série[@débit]'></label>\n"
 "<button class='hbtn' id='lvbtn' data-i18n='start'>Démarrer</button> <button class='hbtn' id='lvmot' data-i18n='moteur'>Moteur</button>\n"
 "<div id='lvstate' style='margin-top:.4em;display:none'>\n"
 "<label><span data-i18n='main1'>GV</span> <select id='lvmain'></select></label>\n"
@@ -335,14 +449,14 @@ static const char PAGE[] =
 "function stopPoll(){if(liveTimer){clearInterval(liveTimer);liveTimer=null;}}\n"
 "async function pollLive(){try{LIVE=await fetch('/api/live').then(r=>r.json());}catch(e){LIVE=null;}\n"
 " if(LIVE&&LIVE.on)$('#lvinfo').textContent='● live · '+LIVE.count+' pts'+(LIVE.cur?(' · TWA '+Math.round(LIVE.cur[0])+'° · BS '+LIVE.cur[1].toFixed(2)):'');\n"
-" else $('#lvinfo').textContent=(LIVE&&LIVE.saved)?('✓ '+LIVE.saved.split('/').pop()):'';\n"
+" else $('#lvinfo').textContent=(LIVE&&LIVE.err)?('⚠ '+LIVE.err):(LIVE&&LIVE.saved)?('✓ '+LIVE.saved.split('/').pop()):'';\n"
 " const on=!!(LIVE&&LIVE.on);$('#lvbtn').textContent=on?T('stop'):T('start');$('#lvbtn').dataset.on=on?'1':'';\n"
 " const mot=!!(LIVE&&LIVE.moteur);$('#lvmot').dataset.on=mot?'1':'';$('#lvmot').style.background=mot?'var(--active)':'';$('#lvmot').style.color=mot?'#fff':'';\n"
 " draw();}\n"
 "$('#lvbtn').onclick=async()=>{if($('#lvbtn').dataset.on==='1'){await fetch('/api/live/stop');stopPoll();await loadBoat();await pollLive();}\n"
 " else{await fetch('/api/live/start?src='+$('#lvsrc').value+'&addr='+encodeURIComponent($('#lvaddr').value));startPoll();await pollLive();}};\n"
 "$('#lvmot').onclick=async()=>{const on=$('#lvmot').dataset.on==='1'?0:1;await fetch('/api/live/moteur?on='+on);await pollLive();};\n"
-"$('#lvsrc').onchange=()=>{$('#lvaddr').value=$('#lvsrc').value==='vdr'?'/home/ozolli/.qtVlm/vdrs/vdr.db':'10110';};\n"
+"$('#lvsrc').onchange=()=>{const v=$('#lvsrc').value;$('#lvaddr').value=v==='vdr'?'/home/ozolli/.qtVlm/vdrs/vdr.db':v==='ngx'?'" SERIAL_DEFAULT "':'10110';};\n"
 "function sendState(){fetch('/api/live/state?main='+encodeURIComponent($('#lvmain').value)+'&head='+encodeURIComponent($('#lvhead').value)+'&sea='+encodeURIComponent($('#lvsea').value)).then(()=>pollLive());}\n"
 "$('#lvmain').onchange=sendState;$('#lvhead').onchange=sendState;$('#lvsea').onchange=sendState;\n"
 "function renderTable(){if(!P||!P.twa){$('#dtable').innerHTML='';return;}\n"
@@ -431,7 +545,7 @@ static const char PAGE[] =
 "<li><b>Bateau</b> — inventaire et polaires. Pour chaque polaire, ses critères en cases à cocher ; <b>ne rien cocher = tout</b>.</li>\n"
 "</ul>\n"
 "<h3>Capture live</h3>\n"
-"<p>Carte <b>Live</b> : choisissez la source — <b>UDP</b> (port d'écoute), <b>TCP</b> (hôte:port) ou <b>VDR qtVlm</b> (chemin du .db) — puis <b>Démarrer</b>. En UDP/TCP, le format est reconnu tout seul : <b>NMEA 0183</b> ou <b>NMEA 2000</b> au format texte YDRAW (n2k-mux port 2700, passerelles Yacht Devices).</p>\n"
+"<p>Carte <b>Live</b> : choisissez la source — <b>UDP</b> (port d'écoute), <b>TCP</b> (hôte:port) ou <b>VDR qtVlm</b> (chemin du .db) ou <b>Actisense NGX-1</b> (port série : <code>/dev/ttyUSB0</code>, <code>COM3</code>, <code>@230400</code> pour changer de débit ; passerelle en mode Transfer) — puis <b>Démarrer</b>. En UDP/TCP, le format est reconnu tout seul : <b>NMEA 0183</b> ou <b>NMEA 2000</b> au format texte YDRAW (n2k-mux port 2700, passerelles Yacht Devices).</p>\n"
 "<p>Réglez en direct l'état du bateau (grand-voile, voile d'avant, état de mer) : chaque point est routé vers <b>toutes</b> les polaires dont les critères correspondent. Le bouton <b>Moteur</b> suspend l'enregistrement quand l'hélice est embrayée.</p>\n"
 "<p>Le nuage gris montre les points bruts, le point rouge la mesure courante, et la courbe se construit sous vos yeux. À l'<b>arrêt</b>, chaque polaire alimentée est enregistrée.</p>\n"
 "<h3>Comment c'est calculé</h3>\n"
@@ -482,7 +596,7 @@ static const char PAGE[] =
 "<li><b>Boat</b> — inventory and polars. For each polar, its criteria as checkboxes; <b>checking nothing = everything</b>.</li>\n"
 "</ul>\n"
 "<h3>Live capture</h3>\n"
-"<p><b>Live</b> card: choose the source — <b>UDP</b> (listening port), <b>TCP</b> (host:port) or <b>qtVlm VDR</b> (path to the .db) — then <b>Start</b>. Over UDP/TCP the format is detected automatically: <b>NMEA 0183</b> or <b>NMEA 2000</b> as YDRAW text (n2k-mux port 2700, Yacht Devices gateways).</p>\n"
+"<p><b>Live</b> card: choose the source — <b>UDP</b> (listening port), <b>TCP</b> (host:port) or <b>qtVlm VDR</b> (path to the .db) or <b>Actisense NGX-1</b> (serial port: <code>/dev/ttyUSB0</code>, <code>COM3</code>, <code>@230400</code> to change the baud rate; gateway in Transfer mode) — then <b>Start</b>. Over UDP/TCP the format is detected automatically: <b>NMEA 0183</b> or <b>NMEA 2000</b> as YDRAW text (n2k-mux port 2700, Yacht Devices gateways).</p>\n"
 "<p>Set the boat state live (mainsail, headsail, sea state): every point is routed to <b>all</b> the polars whose criteria match. The <b>Engine</b> button suspends recording while the propeller is engaged.</p>\n"
 "<p>The grey cloud shows raw points, the red dot the current measurement, and the curve builds up as you sail. On <b>Stop</b>, every polar that received data is saved.</p>\n"
 "<h3>How it is computed</h3>\n"
@@ -974,9 +1088,13 @@ static void serve_curve(int fd, double tws)
 /* ============================ Capture live (P1) ============================ *
  * Un seul process, intégré à la boucle poll() du serveur. Réutilise le pipeline
  * d'import.c (parse_nmea_sentence, débruitage STW/SOG, lissage, grille).
- * Sources : NMEA TCP (client) et NMEA UDP (écoute). État exposé en polling. */
+ * Sources : TCP (client) et UDP (écoute) en NMEA 0183 ou N2K YDRAW, VDR qtVlm,
+ * passerelle série Actisense NGX-1/NGT-1. État exposé en polling. */
 
-static int    g_live_on = 0, g_live_src = 0, g_live_fd = -1;  /* src 1=tcp 2=udp 3=vdr */
+static int    g_live_on = 0, g_live_src = 0, g_live_fd = -1;  /* src 1=tcp 2=udp 3=vdr 4=ngx (série) */
+static char   g_live_err[200] = "";       /* cause du dernier échec de démarrage / de la perte de source */
+static actisense_rx_t g_act;                /* décodeur série Actisense */
+static time_t g_act_ping = 0;               /* dernier envoi de la commande « tous les PGN » */
 static int    g_live_moteur = 0;           /* moteur embrayé -> on ignore les points */
 static char   g_live_addr[128] = "";
 static long   g_live_count = 0;
@@ -1036,15 +1154,42 @@ static void live_add(double twa, double tws, double bsp)
     g_cur_twa = twa; g_cur_bsp = bsp; g_cur_tws = tws; g_live_count++;
 }
 
-/* Une phrase NMEA complète : même pipeline que process_nmea_file (lissé). */
-static void live_feed_sentence(const char *line)
+/* Un point TWA+TWS+STW complet dans g_lnmea : même pipeline que process_nmea_file (lissé). */
+static void live_point(void)
 {
-    if (!parse_nav_line(line, &g_lnmea)) return;   /* NMEA 0183 ou N2K YDRAW */
     if (g_lnmea.has_sog && !stw_sog_accept(&g_lfilt, g_lnmea.bsp, g_lnmea.sog)) return;
     double twa = g_lnmea.twa, tws = g_lnmea.tws, bsp = g_lnmea.bsp;
     if (NMEA_SMOOTH_WINDOW > 1)
         nmea_smoother_push(&g_lsm, g_lnmea.twa, g_lnmea.tws, g_lnmea.bsp, &twa, &tws, &bsp);
     live_add(twa, tws, bsp);
+}
+
+static void live_feed_sentence(const char *line)
+{
+    if (parse_nav_line(line, &g_lnmea)) live_point();   /* NMEA 0183 ou N2K YDRAW */
+}
+
+/* Passerelle Actisense : relève le port série, décode, et renvoie toutes les 20 s
+ * la commande « tous les PGN » (comme canboat/actisense-serial). */
+static void live_serial_tick(void)
+{
+    uint8_t b[4096];
+    long got;
+    while ((got = serial_read(b, sizeof b)) > 0)
+        for (long i = 0; i < got; i++) {
+            int pgn, len; const uint8_t *data;
+            if (actisense_rx_byte(&g_act, b[i], &pgn, &data, &len) && n2k_apply_frame(pgn, data, len, &g_lnmea))
+                live_point();
+        }
+    if (got < 0) {
+        snprintf(g_live_err, sizeof g_live_err, "port série perdu (%s)", g_live_addr);
+        serial_close(); g_live_on = 0;
+        return;
+    }
+    if (time(NULL) - g_act_ping >= 20) {
+        uint8_t st[32]; size_t n = actisense_startup_frame(st, sizeof st);
+        serial_write(st, n); g_act_ping = time(NULL);
+    }
 }
 
 /* Tick VDR : ingère les lignes ajoutées depuis le dernier TIME vu (non lissé). */
@@ -1133,6 +1278,7 @@ static void live_stop(void)
     if (g_live_fd >= 0) sock_close(g_live_fd);
     g_live_fd = -1;
     if (g_vdr) { sqlite3_close(g_vdr); g_vdr = NULL; }
+    serial_close();
     g_live_on = 0;
 }
 
@@ -1156,8 +1302,23 @@ static void live_start(int src, const char *addr)
     g_disp = def_index_for_selected();
 
     int ok;
-    if (src == 3) ok = (live_vdr_open(addr) == 0);
-    else { int fd = (src == 1) ? open_tcp(addr) : open_udp(addr); if (fd >= 0) g_live_fd = fd; ok = (fd >= 0); }
+    g_live_err[0] = 0;
+    if (src == 3) {
+        ok = (live_vdr_open(addr) == 0);
+        if (!ok) snprintf(g_live_err, sizeof g_live_err, "VDR illisible : %s", addr);
+    } else if (src == 4) {
+        ok = serial_open(addr, g_live_err, sizeof g_live_err);
+        if (ok) {
+            actisense_rx_reset(&g_act);
+            uint8_t st[32]; size_t n = actisense_startup_frame(st, sizeof st);
+            serial_write(st, n); g_act_ping = time(NULL);
+        }
+    } else {
+        int fd = (src == 1) ? open_tcp(addr) : open_udp(addr);
+        if (fd >= 0) g_live_fd = fd;
+        ok = (fd >= 0);
+        if (!ok) snprintf(g_live_err, sizeof g_live_err, "%s : %s", src == 1 ? "connexion TCP impossible" : "écoute UDP impossible", addr);
+    }
     if (ok) { g_live_on = 1; g_live_src = src; snprintf(g_live_addr, sizeof g_live_addr, "%s", addr); }
 }
 
@@ -1208,6 +1369,7 @@ static void serve_live(int fd)
     if (w < 0 || (size_t)w >= sizeof buf - n) { send_text(fd, 500, "Error", "application/json", "{}"); return; } \
     n += (size_t)w; } while (0)
     APP("{\"on\":%s,\"src\":%d,\"count\":%ld,", g_live_on ? "true" : "false", g_live_src, g_live_count);
+    { char e[400]; json_escape(g_live_err, e, sizeof e); APP("\"err\":\"%s\",", e); }
     if (g_cur_twa >= 0 && g_cur_bsp > 0) APP("\"cur\":[%.1f,%.2f,%.1f],", g_cur_twa, g_cur_bsp, g_cur_tws);
     else APP("\"cur\":null,");
     APP("\"pts\":[");
@@ -1564,7 +1726,8 @@ static void handle_client(int fd)
     else if (strncmp(path, "/api/live/start", 15) == 0) {
         const char *ps = strstr(path, "src="), *pa = strstr(path, "addr=");
         int src = 2;
-        if (ps) { if (strncmp(ps + 4, "tcp", 3) == 0) src = 1; else if (strncmp(ps + 4, "vdr", 3) == 0) src = 3; }
+        if (ps) { if (strncmp(ps + 4, "tcp", 3) == 0) src = 1; else if (strncmp(ps + 4, "vdr", 3) == 0) src = 3;
+                  else if (strncmp(ps + 4, "ngx", 3) == 0) src = 4; }
         char addr[128] = "10110";
         if (pa) { pa += 5; size_t i = 0; while (pa[i] && pa[i] != '&' && i < sizeof addr - 1) { addr[i] = pa[i]; i++; } addr[i] = 0; }
         live_start(src, addr);
@@ -1721,7 +1884,7 @@ int main(int argc, char **argv)
         int nf = 0;
         pfds[nf].fd = ls; pfds[nf].events = POLLIN; nf++;
         if (g_live_on && g_live_fd >= 0) { pfds[nf].fd = g_live_fd; pfds[nf].events = POLLIN; nf++; }
-        int r = poll(pfds, nf, g_live_on ? 1000 : -1);
+        int r = poll(pfds, nf, !g_live_on ? -1 : g_live_src == 4 ? 50 : 1000);  /* série : relevé toutes les 50 ms */
         if (r < 0) { if (errno == EINTR) continue; break; }
         if (pfds[0].revents & POLLIN) {
             int fd = (int)accept(ls, NULL, NULL);
@@ -1738,6 +1901,7 @@ int main(int argc, char **argv)
             else if (got == 0 && g_live_src == 1) live_stop();  /* TCP fermé par la passerelle */
         }
         if (g_live_on && g_live_src == 3) live_vdr_tick();      /* tail VDR (~1/s) */
+        if (g_live_on && g_live_src == 4) live_serial_tick();   /* passerelle Actisense */
     }
     sock_close(ls);
     return 0;

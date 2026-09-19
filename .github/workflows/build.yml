@@ -160,6 +160,8 @@ jobs:
         sleep 2
         test "$(curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:18081/api/polar)" = 401
         curl -fsS -u ci:test -o /dev/null http://127.0.0.1:18081/api/polar
+        # Source série Actisense : un port absent doit être signalé, pas planter
+        curl -fsS -u ci:test "http://127.0.0.1:18081/api/live/start?src=ngx&addr=COM99" | tee /dev/stderr | grep -q 'port inexistant'
         kill $PID 2>/dev/null || taskkill //F //IM polar_doctor_web.exe
 
     - name: Create package (exe + DLL)

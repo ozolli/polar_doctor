@@ -67,7 +67,8 @@ fichiers de log (onglet *Données*) ou **capturer en direct** (carte *Live*) →
   cocher ; un critère absent de l'inventaire est signalé
 
 ### Capture live
-- ✅ Sources **UDP**, **TCP** ou **VDR qtVlm** (suivi de `vdr.db`). En UDP/TCP, le format est
+- ✅ Sources **UDP**, **TCP**, **VDR qtVlm** (suivi de `vdr.db`) ou passerelle série **Actisense
+  NGX-1/NGT-1** (NMEA 2000 lu directement, Linux et Windows). En UDP/TCP, le format est
   reconnu ligne par ligne : **NMEA 0183** ou **NMEA 2000** au format texte **YDRAW** — directement
   depuis [n2k-mux](https://github.com/ozolli/n2k-mux) (port TCP **2700**) — qui lit lui-même un
   adaptateur CAN (socketcan) ou une passerelle **Actisense NGX-1/NGT-1** — ou depuis une
@@ -279,10 +280,23 @@ C'est ce que publient n2k-mux (TCP 2700) et les passerelles/enregistreurs Yacht 
 09:30:59.677 R 09F50305 FF A6 03 FF FF 00 FF FF     STW 9,34 m/s
 ```
 
-Une passerelle N2K **série/USB** (Actisense NGX-1/NGT-1) ne publie pas de YDRAW elle-même : la
-passer par **n2k-mux** (NGX-1 en mode **Transfer**, sortie YDRAW sur le port 2700 par
-`ydraw-bridge`), qui arbitre en plus les sources en double. À défaut, sortie 0183 de la
-passerelle relayée sur le réseau (kplex…).
+### Passerelle série Actisense NGX-1 / NGT-1
+
+Source live **Actisense NGX-1 (série)** : polar_doctor lit la passerelle directement, sans
+canboat ni n2k-mux, avec le même protocole que `actisense-serial` de canboat (messages N2K
+`0x93`, commande « tous les PGN » envoyée à l'ouverture puis toutes les 20 s).
+
+- La passerelle doit être en mode **Transfer** (N2K brut), pas Convert — réglage par Actisense
+  Toolkit.
+- Adresse : le port série, suivi de `@débit` si besoin (défaut **115200**, sortie d'usine ;
+  230400 conseillé sur un bus chargé) :
+  - Linux : `/dev/ttyUSB0`, ou mieux `/dev/serial/by-id/usb-Actisense_…` (nom stable). L'utilisateur
+    du serveur doit être dans le groupe **`dialout`** (`sudo usermod -aG dialout $USER`, puis
+    se reconnecter / redémarrer le service) ;
+  - Windows : `COM3` (voir le Gestionnaire de périphériques).
+- Un port série ne s'ouvre qu'une fois : si **n2k-mux** utilise déjà la passerelle, lire plutôt son
+  port **2700** (YDRAW). n2k-mux arbitre en plus les sources en double sur le bus, ce que
+  polar_doctor ne fait pas.
 
 ### Fichiers VDR (qtVlm)
 

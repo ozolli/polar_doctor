@@ -199,6 +199,11 @@ bool n2k_apply_frame(int pgn, const uint8_t *d, int len, nmea_data_t *data);
 int n2k_pgn_from_id(uint32_t id);
 bool parse_ydraw_line(const char *line, nmea_data_t *data);
 bool parse_nav_line(const char *line, nmea_data_t *data);   // 0183 ou YDRAW, détecté
+// Passerelle série Actisense NGT-1 / NGX-1 (mode Transfer)
+typedef struct { uint8_t buf[512]; size_t n; int state, prev; } actisense_rx_t;
+void actisense_rx_reset(actisense_rx_t *r);
+bool actisense_rx_byte(actisense_rx_t *r, uint8_t c, int *pgn, const uint8_t **data, int *len);
+size_t actisense_startup_frame(uint8_t *out, size_t cap);
 void add_data_point(polar_grid_t *grid, double twa, double tws, double bsp);
 double aggregate_cell(data_point_t *head);
 double get_polar_value(polar_grid_t *grid, int angle, int speed);

@@ -10,6 +10,11 @@ Toutes les modifications notables du projet seront documentées dans ce fichier.
   (0183 ou YDRAW) est détecté ligne par ligne. PGN 130306 (vent vrai eau prioritaire, fond en
   repli, apparent ignoré), 128259 (STW), 129026 (SOG), 127250 (cap vrai, ou magnétique +
   variation).
+- ✅ **Passerelle série Actisense NGX-1/NGT-1** en source live (Linux et Windows), sans canboat :
+  protocole BST `0x93` (DLE STX/ETX, somme de contrôle), commande « tous les PGN » à l'ouverture
+  et toutes les 20 s comme `actisense-serial`. Adresse `port[@débit]` (défaut 115200).
+- ✅ Échec de démarrage du live (port absent, droits `dialout`, TCP refusé, VDR illisible) et
+  perte de la source série affichés dans la carte Live.
 
 ## [2.0.1] - 2026-09-19
 

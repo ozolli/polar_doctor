@@ -68,6 +68,11 @@ accepted for scripts. 401 responses carry no `WWW-Authenticate` (it would open t
      MWV,T priority, ref 3 / ref 0+heading fallback, apparent ignored; 128259 STW; 129026 SOG;
      127250 heading). All single-frame, no fast-packet. `parse_nav_line()` dispatches 0183 vs
      YDRAW per line — used by file import and live capture.
+   - Actisense NGX-1/NGT-1 serial gateway (live source `ngx`, `port[@baud]`): `actisense_rx_byte()`
+     unframes DLE STX…DLE ETX, checks the zero-sum checksum, keeps command 0x93 and feeds
+     `n2k_apply_frame()`. The server sends `actisense_startup_frame()` (0xA1 11 02 00, "all
+     PGNs") on open and every 20 s, like canboat's actisense-serial. Serial I/O is in
+     web/server.c (`serial_open/read/write`: termios / CreateFileW), polled every 50 ms.
    - VDR SQLite: the `VDR` table's TWA/TWS/STW, plus SOG/RPM/COMMENT/TIME when present.
 2. **Denoising / filtering**
    - NMEA STW sliding-window smoothing (`nmea_smoother_t`), reset across maneuvers.
