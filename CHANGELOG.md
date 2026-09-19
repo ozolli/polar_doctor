@@ -2,6 +2,12 @@
 
 Toutes les modifications notables du projet seront documentées dans ce fichier.
 
+## [Non publié]
+
+### Corrigé
+- 🐛 Source VDR sous Windows : `vdr.db` proposé par défaut depuis le dossier `vdrs` de
+  l'installation qtVlm (`%ProgramFiles%\qtVlm\vdrs`), s'il existe.
+
 ## [2.1.0] - 2026-09-19
 
 ### Ajouté

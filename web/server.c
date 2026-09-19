@@ -1372,9 +1372,17 @@ static void serve_live(int fd)
     n += (size_t)w; } while (0)
     APP("{\"on\":%s,\"src\":%d,\"count\":%ld,", g_live_on ? "true" : "false", g_live_src, g_live_count);
     { char e[400]; json_escape(g_live_err, e, sizeof e); APP("\"err\":\"%s\",", e); }
-    {   /* VDR qtVlm proposé par défaut : ~/.qtVlm/vdrs/vdr.db de l'utilisateur du
-         * serveur, seulement s'il existe (emplacement Windows non documenté : on ne devine pas). */
+    {   /* VDR qtVlm proposé par défaut, seulement s'il existe : ~/.qtVlm/vdrs/vdr.db
+         * (Linux), ou le dossier vdrs de l'installation qtVlm sous Windows
+         * (%ProgramFiles%\\qtVlm\\vdrs). */
         char *vd = g_build_filename(g_get_home_dir(), ".qtVlm", "vdrs", "vdr.db", NULL);
+#ifdef _WIN32
+        if (!g_file_test(vd, G_FILE_TEST_IS_REGULAR)) {
+            const char *pf = g_getenv("ProgramFiles");
+            g_free(vd);
+            vd = g_build_filename(pf && pf[0] ? pf : "C:\\Program Files", "qtVlm", "vdrs", "vdr.db", NULL);
+        }
+#endif
         char e[1100]; json_escape(g_file_test(vd, G_FILE_TEST_IS_REGULAR) ? vd : "", e, sizeof e);
         g_free(vd);
         APP("\"vdr_default\":\"%s\",", e);
