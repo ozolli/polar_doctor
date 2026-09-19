@@ -2,7 +2,7 @@
 #include "libpolar.h"
 static int fails = 0;
 #define CHECK(c, ...) do { if (!(c)) { fails++; printf("ÉCHEC l.%d : ", __LINE__); printf(__VA_ARGS__); printf("\n"); } } while (0)
-#define NEAR(a, b, e) (fabs((a) - (b)) < (e))
+#define APPROX(a, b, e) (fabs((a) - (b)) < (e))
 /* Ligne YDRAW : PGN diffusé (PDU2), priorité 2, source 35 */
 static void yd(char *out, int pgn, const uint8_t *b, int n) {
     unsigned id = (2u << 26) | ((unsigned)pgn << 8) | 35u;
@@ -46,17 +46,17 @@ int main(void) {
     /* 1. vent vrai/eau bâbord 315° 10 m/s + STW 3 m/s -> point TWA 45 */
     memset(&d, 0, sizeof d);
     wind(l, 10, 315, 4); CHECK(!parse_nav_line(l, &d), "vent seul ne complète pas");
-    CHECK(NEAR(d.twa, 45, 0.01) && NEAR(d.tws, 19.438, 0.01), "twa=%.2f tws=%.2f", d.twa, d.tws);
+    CHECK(APPROX(d.twa, 45, 0.01) && APPROX(d.tws, 19.438, 0.01), "twa=%.2f tws=%.2f", d.twa, d.tws);
     stw(l, 3); CHECK(parse_nav_line(l, &d), "STW complète le point");
-    CHECK(NEAR(d.bsp, 5.83, 0.01), "bsp=%.3f", d.bsp);
+    CHECK(APPROX(d.bsp, 5.83, 0.01), "bsp=%.3f", d.bsp);
     /* 2. apparent ignoré */
     wind(l, 20, 30, 2); parse_nav_line(l, &d);
-    CHECK(NEAR(d.twa, 45, 0.01) && NEAR(d.tws, 19.438, 0.01), "apparent a écrasé : twa=%.2f", d.twa);
+    CHECK(APPROX(d.twa, 45, 0.01) && APPROX(d.tws, 19.438, 0.01), "apparent a écrasé : twa=%.2f", d.twa);
     /* 3. vent fond (réf 0) ignoré une fois le vent eau vu */
     wind(l, 5, 200, 0); parse_nav_line(l, &d);
-    CHECK(NEAR(d.twa, 45, 0.01), "vent fond a écrasé le vent eau");
+    CHECK(APPROX(d.twa, 45, 0.01), "vent fond a écrasé le vent eau");
     /* 4. SOG : pas de point, has_sog */
-    sog(l, 3.1); CHECK(!parse_nav_line(l, &d) && d.has_sog && NEAR(d.sog, 6.03, 0.01), "sog=%.2f", d.sog);
+    sog(l, 3.1); CHECK(!parse_nav_line(l, &d) && d.has_sog && APPROX(d.sog, 6.03, 0.01), "sog=%.2f", d.sog);
 
     /* 5. sans vent eau : direction 100° + cap vrai 40° -> TWA 60 */
     memset(&d, 0, sizeof d);
@@ -64,17 +64,17 @@ int main(void) {
     stw(l, 3); parse_nav_line(l, &d);
     CHECK(!d.has_twa, "pas de TWA sans cap");
     hdg(l, 40, 0, 0); CHECK(parse_nav_line(l, &d), "cap complète le point");
-    CHECK(NEAR(d.twa, 60, 0.05), "twa=%.2f", d.twa);
+    CHECK(APPROX(d.twa, 60, 0.05), "twa=%.2f", d.twa);
     /* 6. cap magnétique 45° + variation −5° -> vrai 40° -> TWA 60 */
     hdg(l, 45, -5, 1); parse_nav_line(l, &d);
-    CHECK(NEAR(d.heading, 40, 0.05), "heading=%.2f", d.heading);
+    CHECK(APPROX(d.heading, 40, 0.05), "heading=%.2f", d.heading);
     /* 7. cap magnétique sans variation : ignoré */
     hdg(l, 90, 999, 1); parse_nav_line(l, &d);
-    CHECK(NEAR(d.heading, 40, 0.05), "cap mag sans variation accepté : %.2f", d.heading);
+    CHECK(APPROX(d.heading, 40, 0.05), "cap mag sans variation accepté : %.2f", d.heading);
     /* 8. vrai/bateau (réf 3), angle à l'étrave */
     memset(&d, 0, sizeof d);
     wind(l, 6, 120, 3); parse_nav_line(l, &d);
-    CHECK(NEAR(d.twa, 120, 0.05) && !d.has_mwv_true, "ref3 twa=%.2f", d.twa);
+    CHECK(APPROX(d.twa, 120, 0.05) && !d.has_mwv_true, "ref3 twa=%.2f", d.twa);
 
     /* 9. valeurs non disponibles et lignes invalides */
     memset(&d, 0, sizeof d);
@@ -85,12 +85,12 @@ int main(void) {
     CHECK(!parse_nav_line("12:00:00.000 R 09F50323 FF 2C1 01", &d) && !d.has_bsp, "octet à 3 chiffres accepté");
     CHECK(!parse_nav_line("", &d) && !parse_nav_line("   ", &d) && !parse_nav_line("!AIVDM,1,1,,A,x,0*00", &d), "lignes vides/AIS");
     /* trame courte : 128259 sur 3 octets suffit */
-    CHECK(!parse_nav_line("12:00:00.000 R 09F50323 FF 2C 01", &d) && d.has_bsp && NEAR(d.bsp, 3.0*1.94384, 0.01), "STW 3 octets bsp=%.2f", d.bsp);
+    CHECK(!parse_nav_line("12:00:00.000 R 09F50323 FF 2C 01", &d) && d.has_bsp && APPROX(d.bsp, 3.0*1.94384, 0.01), "STW 3 octets bsp=%.2f", d.bsp);
 
     /* 10. le 0183 passe toujours par parse_nav_line */
     memset(&d, 0, sizeof d);
     parse_nav_line("$IIMWV,315.0,T,12.3,N,A*0C", &d);
-    CHECK(d.has_mwv_true && NEAR(d.twa, 45, 0.01), "0183 via parse_nav_line (twa=%.1f, has=%d)", d.twa, d.has_mwv_true);
+    CHECK(d.has_mwv_true && APPROX(d.twa, 45, 0.01), "0183 via parse_nav_line (twa=%.1f, has=%d)", d.twa, d.has_mwv_true);
 
     printf(fails ? "%d échec(s)\n" : "OK : tous les tests passent\n", fails);
     return fails != 0;

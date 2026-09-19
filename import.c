@@ -510,7 +510,7 @@ int process_nmea_file(const char *filename, polar_grid_t *grid, ProgressContext 
     if (!f) return -1;
 
     char line[PG_MAX_LINE];
-    int line_count = 0, data_count = 0, filtered_count = 0;
+    int line_count = 0, data_count = 0;
     nmea_data_t current_data;
     memset(&current_data, 0, sizeof(nmea_data_t));
     nmea_smoother_t smoother;
@@ -537,10 +537,8 @@ int process_nmea_file(const char *filename, polar_grid_t *grid, ProgressContext 
             // le lissage (pour qu'un pic ne pollue pas la moyenne mobile). Inactif
             // tant qu'aucune trame SOG n'a été vue.
             if (current_data.has_sog &&
-                !stw_sog_accept(&stwf, current_data.bsp, current_data.sog)) {
-                filtered_count++;
+                !stw_sog_accept(&stwf, current_data.bsp, current_data.sog))
                 continue;
-            }
 
             double twa = current_data.twa, tws = current_data.tws, bsp = current_data.bsp;
             if (NMEA_SMOOTH_WINDOW > 1)
@@ -651,7 +649,7 @@ int process_vdr_file(const char *filename, polar_grid_t *grid, ProgressContext *
         return -1;
     }
 
-    int data_count = 0, filtered_count = 0;
+    int data_count = 0;
     engine_state_t engine = ENG_SAILING;  // forward-fill : voile / charge débrayée / moteur embrayé
     stw_sog_filter_t stwf;  // débruitage STW via SOG (offset courant suivi)
     stw_sog_reset(&stwf);
@@ -692,10 +690,8 @@ int process_vdr_file(const char *filename, polar_grid_t *grid, ProgressContext *
 
         // Exclusion : moteur embrayé (tag Moteur), ou RPM > 0 sans annotation de charge.
         bool engine_on = has_rpm && rpm > 0.0;
-        if (engine == ENG_MOTORING || (engine_on && engine != ENG_CHARGING)) {
-            filtered_count++;
+        if (engine == ENG_MOTORING || (engine_on && engine != ENG_CHARGING))
             continue;
-        }
 
         if (twa < 0 || twa > 180 || tws < 0.1 || tws > 70 || stw < 0.1 || stw > 50) {
             continue;
@@ -708,10 +704,8 @@ int process_vdr_file(const char *filename, polar_grid_t *grid, ProgressContext *
             if (have_prev_time && (t - prev_time) > STW_SOG_GAP_RESET) stw_sog_reset(&stwf);
             prev_time = t;
             have_prev_time = true;
-            if (!stw_sog_accept(&stwf, stw, sog)) {
-                filtered_count++;           // saut anormal -> on jette ce STW
-                continue;
-            }
+            if (!stw_sog_accept(&stwf, stw, sog))
+                continue;                   // saut anormal -> on jette ce STW
         }
 
         if (progress && data_count % 1000 == 0) {

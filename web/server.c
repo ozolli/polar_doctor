@@ -880,10 +880,10 @@ static void scan_boat(const char *dir)
     for (int i = 0; i < g_npol - 1; i++)            /* tri alphabétique */
         for (int j = i + 1; j < g_npol; j++)
             if (g_ascii_strcasecmp(g_pol_names[i], g_pol_names[j]) > 0) {
-                char tp[512], tn[128];
-                snprintf(tp, sizeof tp, "%s", g_pol_paths[i]); snprintf(tn, sizeof tn, "%s", g_pol_names[i]);
-                snprintf(g_pol_paths[i], 512, "%s", g_pol_paths[j]); snprintf(g_pol_names[i], 128, "%s", g_pol_names[j]);
-                snprintf(g_pol_paths[j], 512, "%s", tp); snprintf(g_pol_names[j], 128, "%s", tn);
+                char tp[sizeof g_pol_paths[0]], tn[sizeof g_pol_names[0]];   /* échange de lignes entières */
+                memcpy(tp, g_pol_paths[i], sizeof tp); memcpy(tn, g_pol_names[i], sizeof tn);
+                memcpy(g_pol_paths[i], g_pol_paths[j], sizeof tp); memcpy(g_pol_names[i], g_pol_names[j], sizeof tn);
+                memcpy(g_pol_paths[j], tp, sizeof tp); memcpy(g_pol_names[j], tn, sizeof tn);
             }
 }
 
