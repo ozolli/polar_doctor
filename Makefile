@@ -21,7 +21,7 @@ ifeq ($(OS),Windows_NT)
     LDLIBS += -lws2_32 -lbcrypt
 endif
 
-.PHONY: all web install install-web uninstall uninstall-web clean help
+.PHONY: all web test install install-web uninstall uninstall-web clean help
 
 all: $(TARGET)
 
@@ -30,6 +30,15 @@ $(TARGET): $(SRC) $(HDR)
 	@echo "✓ $(TARGET) : ./$(TARGET) [dossier-bateau|fichier.pol] --port 8081"
 
 web: all   # ancien nom de cible, conservé
+
+# Tests unitaires du cœur (sans le serveur), lancés depuis la racine du dépôt.
+CORE = polar_data.c import.c boat_config.c libpolar.c
+TESTS = $(wildcard tests/test_*.c)
+test: $(TESTS) $(CORE) $(HDR)
+	@set -e; for t in $(TESTS); do \
+	    $(CC) $(CFLAGS) -o tests/run_$$(basename $$t .c) $$t $(CORE) $(LDLIBS); \
+	    echo "== $$t"; ./tests/run_$$(basename $$t .c); \
+	done
 
 # --- Service systemd (Linux) : make && sudo make install ---
 # Ne recompile PAS (sous sudo, le binaire du dépôt deviendrait propriété de root).
@@ -62,7 +71,7 @@ uninstall-web:
 	@echo "(/etc/default/polar_doctor_web conservé : il contient le mot de passe)"
 
 clean:
-	rm -f polar_doctor_web polar_doctor_web.exe polar_doctor
+	rm -f polar_doctor_web polar_doctor_web.exe polar_doctor tests/run_*
 	rm -rf dist/
 
 help:
@@ -70,4 +79,5 @@ help:
 	@echo "  make                 compiler $(TARGET)"
 	@echo "  sudo make install    installer binaire + service systemd (Linux)"
 	@echo "  sudo make uninstall  désinstaller (garde /etc/default/polar_doctor_web)"
+	@echo "  make test            tests unitaires du cœur"
 	@echo "  make clean           supprimer les binaires"

@@ -63,6 +63,11 @@ accepted for scripts. 401 responses carry no `WWW-Authenticate` (it would open t
      its 0–360° angle is folded to a 0–180° TWA. `MWD` + heading (`HDT`/`HDG`/`VHW`) is the
      fallback (ground-referenced, biased by current). `MWV,R` (apparent) is ignored. STW from
      `VHW`; SOG from RMC/VTG/VBW/RMA/OSD (`parse_sog_sentence()`).
+   - NMEA 2000 as YDRAW text (`hh:mm:ss.ddd R <29-bit id> <bytes>`, n2k-mux TCP 2700):
+     `parse_ydraw_line()` → `n2k_apply_frame()` fills the same `nmea_data_t` (130306 wind ref 4 =
+     MWV,T priority, ref 3 / ref 0+heading fallback, apparent ignored; 128259 STW; 129026 SOG;
+     127250 heading). All single-frame, no fast-packet. `parse_nav_line()` dispatches 0183 vs
+     YDRAW per line — used by file import and live capture.
    - VDR SQLite: the `VDR` table's TWA/TWS/STW, plus SOG/RPM/COMMENT/TIME when present.
 2. **Denoising / filtering**
    - NMEA STW sliding-window smoothing (`nmea_smoother_t`), reset across maneuvers.
@@ -101,3 +106,7 @@ Under `Test/`:
   recordings, clean by construction (good for non-regression checks).
 - `Comments.db` — exercises the `COMMENT`/`RPM` columns (charge keyword, sail/sea tags).
 - `Hakefjord.nmea` — a real NMEA0183 log (RMC/RMA/VHW…, no wind sentences) for STW/SOG tests.
+- `n2k-mux-sim.ydraw` — 5 s of NMEA 2000 YDRAW from the n2k-mux simulator (apparent + true/water
+  wind, STW, SOG, heading): 53 points.
+
+Unit tests: `tests/*.c`, run with `make test` (link the core modules, not the server).

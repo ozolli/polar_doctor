@@ -2,6 +2,15 @@
 
 Toutes les modifications notables du projet seront documentées dans ce fichier.
 
+## [Non publié]
+
+### Ajouté
+- ✅ **Lecture native du NMEA 2000** au format texte **YDRAW** (n2k-mux TCP 2700, passerelles
+  et enregistreurs Yacht Devices), en capture live UDP/TCP comme en import de fichier ; le format
+  (0183 ou YDRAW) est détecté ligne par ligne. PGN 130306 (vent vrai eau prioritaire, fond en
+  repli, apparent ignoré), 128259 (STW), 129026 (SOG), 127250 (cap vrai, ou magnétique +
+  variation).
+
 ## [2.0.1] - 2026-09-19
 
 ### Ajouté

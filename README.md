@@ -45,7 +45,8 @@ fichiers de log (onglet *Données*) ou **capturer en direct** (carte *Live*) →
 ## 🌟 Fonctionnalités
 
 ### Construire une polaire
-- ✅ Import de logs **NMEA0183** (.nmea, .log, .txt) et de bases **VDR SQLite** (.db) de qtVlm
+- ✅ Import de logs **NMEA0183** et **NMEA2000 YDRAW** (.nmea, .log, .txt) et de bases **VDR SQLite**
+  (.db) de qtVlm
 - ✅ **Créer** une polaire neuve, ou **Mettre à jour** une polaire existante : l'existant et les
   nouvelles données sont ré-agrégés, la polaire peut monter **ou** baisser (utile pour ramener
   une polaire théorique VPP à la réalité du bateau)
@@ -66,12 +67,10 @@ fichiers de log (onglet *Données*) ou **capturer en direct** (carte *Live*) →
   cocher ; un critère absent de l'inventaire est signalé
 
 ### Capture live
-- ✅ Sources **NMEA0183 UDP**, **NMEA0183 TCP** ou **VDR qtVlm** (suivi de `vdr.db`)
-- ⚠️ Pas de lecture **NMEA2000** native : il faut une passerelle qui publie le N2K en **0183 sur
-  le réseau** — logicielle ([n2k-mux](https://github.com/ozolli/n2k-mux), port TCP 10110) ou
-  Wi-Fi (Yacht Devices YDWG-02…). Une passerelle **série/USB** (Actisense NGX-1, Yacht Devices
-  YDNG-03…) doit en plus être relayée sur le réseau, par exemple avec kplex. Autre voie : laisser
-  qtVlm lire le N2K et capter son **VDR**
+- ✅ Sources **UDP**, **TCP** ou **VDR qtVlm** (suivi de `vdr.db`). En UDP/TCP, le format est
+  reconnu ligne par ligne : **NMEA 0183** ou **NMEA 2000** au format texte **YDRAW** — directement
+  depuis [n2k-mux](https://github.com/ozolli/n2k-mux) (port TCP **2700**) ou une passerelle
+  réseau Yacht Devices (YDWG-02…)
 - ✅ **État du bateau en direct** (grand-voile, voile d'avant, mer) : chaque point est routé vers
   **toutes** les polaires dont les critères correspondent ; bouton **Moteur**
 - ✅ Nuage de points, point courant et **polaire qui se construit en direct**
@@ -262,6 +261,26 @@ $IIVHW,,T,,M,5.8,N,,K*XX          STW 5,8 nœuds
 $GPRMC,123519,A,4807.038,N,01131.000,E,5.9,084.4,230394,,,A*XX
 ```
 
+### Fichiers et flux NMEA 2000 (YDRAW)
+
+Une trame CAN par ligne, au format texte Yacht Devices : `hh:mm:ss.ddd R <ID 29 bits> <octets>`.
+C'est ce que publient n2k-mux (TCP 2700) et les passerelles/enregistreurs Yacht Devices.
+
+| PGN | Rôle |
+|-----|------|
+| **130306** Wind Data | vent vrai **rapporté à l'eau** (réf. 4) prioritaire ; vent vrai fond (réf. 3, ou réf. 0 + cap) en repli ; apparent ignoré |
+| **128259** Speed | vitesse surface (STW) — *requise* |
+| **129026** COG & SOG | vitesse fond (SOG), pour débruiter le STW |
+| **127250** Vessel Heading | cap vrai (ou magnétique + variation), pour la réf. 0 |
+
+```
+09:30:59.677 R 09FD0205 FF 73 04 B8 BD FC FF FF     vent vrai/eau 11,4 m/s, 278°
+09:30:59.677 R 09F50305 FF A6 03 FF FF 00 FF FF     STW 9,34 m/s
+```
+
+Une passerelle N2K **série/USB** (Actisense NGX-1…) ne publie pas de YDRAW : la configurer en
+sortie 0183 et relayer ce 0183 sur le réseau (kplex…).
+
 ### Fichiers VDR (qtVlm)
 
 Base SQLite, table `VDR` : `TWA`, `TWS`, `STW` ; optionnellement `SOG` (débruitage), `RPM` (filtre
@@ -296,8 +315,9 @@ Aucune dépendance graphique : **glib** et **sqlite3** seulement.
 ## 🧪 Données de test
 
 Le dossier `Test/` contient des bases VDR de traversées (`Horta-SantaCruz.db`,
-`Mindelo-LeMarin.db`…), `Comments.db` (colonnes `COMMENT`/`RPM`) et un log NMEA réel
-(`Hakefjord.nmea`).
+`SantaCruz-Mindelo.db`), `Comments.db` (colonnes `COMMENT`/`RPM`), un log NMEA réel
+(`Hakefjord.nmea`) et un enregistrement NMEA 2000 YDRAW du simulateur n2k-mux
+(`n2k-mux-sim.ydraw`). `make test` lance les tests unitaires.
 
 ## 🐛 Signalement de bugs
 

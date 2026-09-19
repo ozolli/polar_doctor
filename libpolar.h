@@ -16,6 +16,7 @@
 #include <locale.h>
 #include <ctype.h>
 #include <stdbool.h>
+#include <stdint.h>
 #include <limits.h>
 #include <sqlite3.h>
 #include <glib.h>
@@ -193,6 +194,11 @@ int nmea_split(char *s, char **out, int maxf);
 bool nmea_field_num(char **f, int nf, int idx, double *out);
 void parse_sog_sentence(const char *type, char **f, int nf, nmea_data_t *data);
 bool parse_nmea_sentence(const char *sentence, nmea_data_t *data);
+// NMEA 2000 (texte YDRAW) : même contrat que parse_nmea_sentence
+bool n2k_apply_frame(int pgn, const uint8_t *d, int len, nmea_data_t *data);
+int n2k_pgn_from_id(uint32_t id);
+bool parse_ydraw_line(const char *line, nmea_data_t *data);
+bool parse_nav_line(const char *line, nmea_data_t *data);   // 0183 ou YDRAW, détecté
 void add_data_point(polar_grid_t *grid, double twa, double tws, double bsp);
 double aggregate_cell(data_point_t *head);
 double get_polar_value(polar_grid_t *grid, int angle, int speed);

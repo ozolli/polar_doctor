@@ -217,7 +217,7 @@ static const char PAGE[] =
 "<label><span data-i18n='tws1'>TWS</span> <input type=number id='dtws' value='10' min='0' step='0.5' style='width:5em'> <span data-i18n='kn'>nœuds</span></label>\n"
 "<div id='read' style='font-size:.85em;margin-top:.4em'></div></div>\n"
 "<div class='card'><h3 data-i18n='live'>Live</h3>\n"
-"<label><span data-i18n='source'>Source</span> <select id='lvsrc'><option value='udp'>NMEA UDP</option><option value='tcp'>NMEA TCP</option><option value='vdr'>VDR qtVlm</option></select></label>\n"
+"<label><span data-i18n='source'>Source</span> <select id='lvsrc'><option value='udp'>UDP (0183 / N2K)</option><option value='tcp'>TCP (0183 / N2K)</option><option value='vdr'>VDR qtVlm</option></select></label>\n"
 "<label><input id='lvaddr' value='10110' style='width:9em' title='UDP: port · TCP: hôte:port · VDR: chemin .db'></label>\n"
 "<button class='hbtn' id='lvbtn' data-i18n='start'>Démarrer</button> <button class='hbtn' id='lvmot' data-i18n='moteur'>Moteur</button>\n"
 "<div id='lvstate' style='margin-top:.4em;display:none'>\n"
@@ -431,7 +431,7 @@ static const char PAGE[] =
 "<li><b>Bateau</b> — inventaire et polaires. Pour chaque polaire, ses critères en cases à cocher ; <b>ne rien cocher = tout</b>.</li>\n"
 "</ul>\n"
 "<h3>Capture live</h3>\n"
-"<p>Carte <b>Live</b> : choisissez la source — <b>NMEA UDP</b> (port d'écoute), <b>NMEA TCP</b> (hôte:port) ou <b>VDR qtVlm</b> (chemin du .db) — puis <b>Démarrer</b>.</p>\n"
+"<p>Carte <b>Live</b> : choisissez la source — <b>UDP</b> (port d'écoute), <b>TCP</b> (hôte:port) ou <b>VDR qtVlm</b> (chemin du .db) — puis <b>Démarrer</b>. En UDP/TCP, le format est reconnu tout seul : <b>NMEA 0183</b> ou <b>NMEA 2000</b> au format texte YDRAW (n2k-mux port 2700, passerelles Yacht Devices).</p>\n"
 "<p>Réglez en direct l'état du bateau (grand-voile, voile d'avant, état de mer) : chaque point est routé vers <b>toutes</b> les polaires dont les critères correspondent. Le bouton <b>Moteur</b> suspend l'enregistrement quand l'hélice est embrayée.</p>\n"
 "<p>Le nuage gris montre les points bruts, le point rouge la mesure courante, et la courbe se construit sous vos yeux. À l'<b>arrêt</b>, chaque polaire alimentée est enregistrée.</p>\n"
 "<h3>Comment c'est calculé</h3>\n"
@@ -443,7 +443,7 @@ static const char PAGE[] =
 "</ul>\n"
 "<h3>Formats de fichiers</h3>\n"
 "<ul>\n"
-"<li><b>NMEA</b> (.nmea, .log, .txt) — vent MWV ou MWD, vitesse surface VHW, cap HDT/HDG ; SOG lu s'il est présent</li>\n"
+"<li><b>NMEA</b> (.nmea, .log, .txt) — vent MWV ou MWD, vitesse surface VHW, cap HDT/HDG ; SOG lu s'il est présent</li>\n<li><b>NMEA 2000</b> (journal texte YDRAW) — vent 130306, vitesse surface 128259, SOG 129026, cap 127250</li>\n"
 "<li><b>VDR</b> (.db) — base SQLite de qtVlm</li>\n"
 "<li><b>Polaire</b> (.pol) — tableau à point-virgule</li>\n"
 "</ul>\n"
@@ -482,7 +482,7 @@ static const char PAGE[] =
 "<li><b>Boat</b> — inventory and polars. For each polar, its criteria as checkboxes; <b>checking nothing = everything</b>.</li>\n"
 "</ul>\n"
 "<h3>Live capture</h3>\n"
-"<p><b>Live</b> card: choose the source — <b>NMEA UDP</b> (listening port), <b>NMEA TCP</b> (host:port) or <b>qtVlm VDR</b> (path to the .db) — then <b>Start</b>.</p>\n"
+"<p><b>Live</b> card: choose the source — <b>UDP</b> (listening port), <b>TCP</b> (host:port) or <b>qtVlm VDR</b> (path to the .db) — then <b>Start</b>. Over UDP/TCP the format is detected automatically: <b>NMEA 0183</b> or <b>NMEA 2000</b> as YDRAW text (n2k-mux port 2700, Yacht Devices gateways).</p>\n"
 "<p>Set the boat state live (mainsail, headsail, sea state): every point is routed to <b>all</b> the polars whose criteria match. The <b>Engine</b> button suspends recording while the propeller is engaged.</p>\n"
 "<p>The grey cloud shows raw points, the red dot the current measurement, and the curve builds up as you sail. On <b>Stop</b>, every polar that received data is saved.</p>\n"
 "<h3>How it is computed</h3>\n"
@@ -494,7 +494,7 @@ static const char PAGE[] =
 "</ul>\n"
 "<h3>File formats</h3>\n"
 "<ul>\n"
-"<li><b>NMEA</b> (.nmea, .log, .txt) — wind MWV or MWD, speed through water VHW, heading HDT/HDG; SOG read when present</li>\n"
+"<li><b>NMEA</b> (.nmea, .log, .txt) — wind MWV or MWD, speed through water VHW, heading HDT/HDG; SOG read when present</li>\n<li><b>NMEA 2000</b> (YDRAW text log) — wind 130306, speed through water 128259, SOG 129026, heading 127250</li>\n"
 "<li><b>VDR</b> (.db) — qtVlm SQLite database</li>\n"
 "<li><b>Polar</b> (.pol) — semicolon-separated table</li>\n"
 "</ul>\n"
@@ -1039,7 +1039,7 @@ static void live_add(double twa, double tws, double bsp)
 /* Une phrase NMEA complète : même pipeline que process_nmea_file (lissé). */
 static void live_feed_sentence(const char *line)
 {
-    if (!parse_nmea_sentence(line, &g_lnmea)) return;
+    if (!parse_nav_line(line, &g_lnmea)) return;   /* NMEA 0183 ou N2K YDRAW */
     if (g_lnmea.has_sog && !stw_sog_accept(&g_lfilt, g_lnmea.bsp, g_lnmea.sog)) return;
     double twa = g_lnmea.twa, tws = g_lnmea.tws, bsp = g_lnmea.bsp;
     if (NMEA_SMOOTH_WINDOW > 1)

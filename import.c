@@ -274,6 +274,138 @@ double get_polar_value(polar_grid_t *grid, int angle, int speed) {
 }
 
 
+/* ------------------------------------------------------------ NMEA 2000 --- */
+/* Lecture native du NMEA 2000 au format texte YDRAW (Yacht Devices RAW) : une
+ * trame CAN par ligne, « hh:mm:ss.ddd R 09F50303 00 1A 02 FF FF 00 FF FF ».
+ * C'est ce que publient n2k-mux (TCP 2700), les passerelles Yacht Devices
+ * (YDWG-02, YDEN-02…) et leurs enregistreurs. Les 4 PGN utiles tiennent chacun
+ * dans une trame unique (pas de réassemblage fast-packet) :
+ *   130306 Wind Data   : vitesse 0,01 m/s, angle 1e-4 rad, référence
+ *                        (0 vrai/nord, 1 magnétique, 2 apparent, 3 vrai/bateau,
+ *                        4 vrai/eau)
+ *   128259 Speed       : STW 0,01 m/s
+ *   129026 COG & SOG   : SOG 0,01 m/s
+ *   127250 Heading     : cap 1e-4 rad, variation, référence (0 vrai, 1 magnétique)
+ * Même contrat que parse_nmea_sentence : met à jour `data`, renvoie true quand une
+ * trame vent/vitesse/cap complète un point TWA+TWS+STW. Même règle de vent : le
+ * vent vrai rapporté à l'eau (réf. 4, = MWV,T) prime sur le vent fond (réf. 0 + cap,
+ * = MWD) ; l'apparent est ignoré. */
+#define N2K_MS_TO_KN 1.9438444924
+#define N2K_RAD_TO_DEG (180.0 / M_PI)
+
+static bool n2k_u16(const uint8_t *d, int off, int len, unsigned *out) {
+    if (off + 2 > len) return false;
+    unsigned v = (unsigned)d[off] | ((unsigned)d[off + 1] << 8);
+    if (v >= 0xFFFD) return false;          // non disponible / hors plage / réservé
+    *out = v;
+    return true;
+}
+
+static double n2k_fold_angle(double deg) {  // angle à l'étrave 0-360 -> TWA 0-180
+    double a = fmod(deg, 360.0);
+    if (a < 0) a += 360.0;
+    return (a > 180.0) ? 360.0 - a : a;
+}
+
+bool n2k_apply_frame(int pgn, const uint8_t *d, int len, nmea_data_t *data) {
+    #define LIVE_COMPLETE() (data->has_twa && data->has_tws && data->has_bsp)
+    unsigned v, a;
+    switch (pgn) {
+    case 130306: {                              // Wind Data
+        if (len < 6 || !n2k_u16(d, 1, len, &v) || !n2k_u16(d, 3, len, &a)) return false;
+        double tws = v * 0.01 * N2K_MS_TO_KN, ang = a * 1e-4 * N2K_RAD_TO_DEG;
+        int ref = d[5] & 0x07;
+        if (tws <= 0.1) return false;
+        if (ref == 4) {                         // vrai rapporté à l'eau, angle / étrave
+            data->twa = n2k_fold_angle(ang);
+            data->tws = tws;
+            data->has_twa = data->has_tws = data->has_mwv_true = true;
+        } else if (data->has_mwv_true) {
+            return false;                       // vent eau prioritaire : on ignore le vent fond
+        } else if (ref == 3) {                  // vrai rapporté au fond, angle / étrave
+            data->twa = n2k_fold_angle(ang);
+            data->tws = tws;
+            data->has_twa = data->has_tws = true;
+        } else if (ref == 0) {                  // vrai rapporté au fond, direction / nord
+            data->twd = ang; data->has_twd = true;
+            data->tws = tws; data->has_tws = true;
+            nmea_update_twa(data);
+        } else {
+            return false;                       // apparent (2) ou magnétique (1)
+        }
+        return LIVE_COMPLETE();
+    }
+    case 128259:                                // Speed, water referenced
+        if (!n2k_u16(d, 1, len, &v) || v * 0.01 * N2K_MS_TO_KN <= 0.1) return false;
+        data->bsp = v * 0.01 * N2K_MS_TO_KN;
+        data->has_bsp = true;
+        return LIVE_COMPLETE();
+    case 129026:                                // COG & SOG, rapid update : SOG seul
+        if (n2k_u16(d, 4, len, &v)) { data->sog = v * 0.01 * N2K_MS_TO_KN; data->has_sog = true; }
+        return false;                           // comme les trames SOG 0183 : pas de point
+    case 127250: {                              // Vessel Heading
+        if (len < 8 || !n2k_u16(d, 1, len, &a)) return false;
+        double hd = a * 1e-4 * N2K_RAD_TO_DEG;
+        int ref = d[7] & 0x03;
+        if (ref == 1) {                         // magnétique : vrai = mag + variation
+            int16_t var = (int16_t)((unsigned)d[5] | ((unsigned)d[6] << 8));
+            if (var == 0x7FFF) return false;    // variation inconnue : cap inutilisable
+            hd += var * 1e-4 * N2K_RAD_TO_DEG;
+        } else if (ref != 0) return false;
+        data->heading = fmod(hd + 360.0, 360.0);
+        data->has_heading = true;
+        nmea_update_twa(data);
+        return LIVE_COMPLETE();
+    }
+    default:
+        return false;
+    }
+    #undef LIVE_COMPLETE
+}
+
+/* PGN d'un identifiant CAN 29 bits (J1939) : PDU1 (PF < 240) = adressé, l'octet PS
+ * est la destination et ne fait pas partie du PGN ; PDU2 = diffusé, PS en fait partie. */
+int n2k_pgn_from_id(uint32_t id) {
+    unsigned pf = (id >> 16) & 0xFF, ps = (id >> 8) & 0xFF, dp = (id >> 24) & 0x3;
+    return (int)((dp << 16) | (pf << 8) | (pf < 240 ? 0 : ps));
+}
+
+bool parse_ydraw_line(const char *line, nmea_data_t *data) {
+    const char *p = line;
+    while (*p == ' ' || *p == '\t') p++;
+    // Horodatage hh:mm:ss.ddd
+    if (!isdigit((unsigned char)p[0]) || !isdigit((unsigned char)p[1]) || p[2] != ':') return false;
+    while (*p && !isspace((unsigned char)*p)) p++;
+    while (*p == ' ') p++;
+    if (*p != 'R' && *p != 'T') return false;   // R = reçu du bus, T = émis sur le bus
+    p++;
+    char *end;
+    unsigned long id = strtoul(p, &end, 16);
+    if (end == p || id > 0x1FFFFFFFUL) return false;
+    p = end;
+    uint8_t d[8];
+    int len = 0;
+    while (len < 8) {
+        while (*p == ' ') p++;
+        if (!isxdigit((unsigned char)*p)) break;
+        unsigned long b = strtoul(p, &end, 16);
+        if (end - p != 2 || b > 0xFF) return false;
+        d[len++] = (uint8_t)b;
+        p = end;
+    }
+    if (len == 0) return false;
+    return n2k_apply_frame(n2k_pgn_from_id((uint32_t)id), d, len, data);
+}
+
+/* Une ligne d'un flux ou d'un fichier de navigation : NMEA 0183 ($…) ou N2K YDRAW. */
+bool parse_nav_line(const char *line, nmea_data_t *data) {
+    const char *p = line;
+    while (*p && isspace((unsigned char)*p)) p++;
+    if (*p == '$') return parse_nmea_sentence(p, data);
+    if (isdigit((unsigned char)*p)) return parse_ydraw_line(p, data);
+    return false;
+}
+
 void nmea_smoother_reset(nmea_smoother_t *s) {
     s->count = 0;
     s->head = 0;
@@ -329,7 +461,7 @@ int process_nmea_file(const char *filename, polar_grid_t *grid, ProgressContext 
             }
         }
 
-        if (parse_nmea_sentence(line, &current_data)) {
+        if (parse_nav_line(line, &current_data)) {
             // Débruitage du loch : rejette un STW qui saute par rapport au SOG, AVANT
             // le lissage (pour qu'un pic ne pollue pas la moyenne mobile). Inactif
             // tant qu'aucune trame SOG n'a été vue.
