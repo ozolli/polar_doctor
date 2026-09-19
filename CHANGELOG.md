@@ -2,7 +2,7 @@
 
 Toutes les modifications notables du projet seront documentées dans ce fichier.
 
-## [Non publié]
+## [2.1.0] - 2026-09-19
 
 ### Ajouté
 - ✅ **Lecture native du NMEA 2000** au format texte **YDRAW** (n2k-mux TCP 2700, passerelles
@@ -15,6 +15,11 @@ Toutes les modifications notables du projet seront documentées dans ce fichier.
   et toutes les 20 s comme `actisense-serial`. Adresse `port[@débit]` (défaut 115200).
 - ✅ Échec de démarrage du live (port absent, droits `dialout`, TCP refusé, VDR illisible) et
   perte de la source série affichés dans la carte Live.
+
+### Corrigé
+- 🐛 Source VDR : le chemin proposé était codé en dur (`/home/ozolli/…`). Il est maintenant
+  `~/.qtVlm/vdrs/vdr.db` de l'utilisateur du serveur, proposé seulement si le fichier existe.
+- 🐛 Windows : avertissements de compilation MinGW supprimés.
 
 ## [2.0.1] - 2026-09-19
 

@@ -456,7 +456,9 @@ static const char PAGE[] =
 "$('#lvbtn').onclick=async()=>{if($('#lvbtn').dataset.on==='1'){await fetch('/api/live/stop');stopPoll();await loadBoat();await pollLive();}\n"
 " else{await fetch('/api/live/start?src='+$('#lvsrc').value+'&addr='+encodeURIComponent($('#lvaddr').value));startPoll();await pollLive();}};\n"
 "$('#lvmot').onclick=async()=>{const on=$('#lvmot').dataset.on==='1'?0:1;await fetch('/api/live/moteur?on='+on);await pollLive();};\n"
-"$('#lvsrc').onchange=()=>{const v=$('#lvsrc').value;$('#lvaddr').value=v==='vdr'?'/home/ozolli/.qtVlm/vdrs/vdr.db':v==='ngx'?'" SERIAL_DEFAULT "':'10110';};\n"
+"$('#lvsrc').onchange=async()=>{const v=$('#lvsrc').value,a=$('#lvaddr');a.placeholder=v==='vdr'?'…/vdrs/vdr.db':'';\n"
+" if(v==='vdr'){let d='';try{d=(await fetch('/api/live').then(r=>r.json())).vdr_default||'';}catch(e){}a.value=d;}\n"
+" else a.value=v==='ngx'?'" SERIAL_DEFAULT "':'10110';};\n"
 "function sendState(){fetch('/api/live/state?main='+encodeURIComponent($('#lvmain').value)+'&head='+encodeURIComponent($('#lvhead').value)+'&sea='+encodeURIComponent($('#lvsea').value)).then(()=>pollLive());}\n"
 "$('#lvmain').onchange=sendState;$('#lvhead').onchange=sendState;$('#lvsea').onchange=sendState;\n"
 "function renderTable(){if(!P||!P.twa){$('#dtable').innerHTML='';return;}\n"
@@ -1370,6 +1372,13 @@ static void serve_live(int fd)
     n += (size_t)w; } while (0)
     APP("{\"on\":%s,\"src\":%d,\"count\":%ld,", g_live_on ? "true" : "false", g_live_src, g_live_count);
     { char e[400]; json_escape(g_live_err, e, sizeof e); APP("\"err\":\"%s\",", e); }
+    {   /* VDR qtVlm proposé par défaut : ~/.qtVlm/vdrs/vdr.db de l'utilisateur du
+         * serveur, seulement s'il existe (emplacement Windows non documenté : on ne devine pas). */
+        char *vd = g_build_filename(g_get_home_dir(), ".qtVlm", "vdrs", "vdr.db", NULL);
+        char e[1100]; json_escape(g_file_test(vd, G_FILE_TEST_IS_REGULAR) ? vd : "", e, sizeof e);
+        g_free(vd);
+        APP("\"vdr_default\":\"%s\",", e);
+    }
     if (g_cur_twa >= 0 && g_cur_bsp > 0) APP("\"cur\":[%.1f,%.2f,%.1f],", g_cur_twa, g_cur_bsp, g_cur_tws);
     else APP("\"cur\":null,");
     APP("\"pts\":[");
