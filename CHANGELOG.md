@@ -2,7 +2,7 @@
 
 Toutes les modifications notables du projet seront documentées dans ce fichier.
 
-## [Non publié]
+## [2.0.1] - 2026-09-19
 
 ### Ajouté
 - ✅ **Fichier de réglages `web.conf`** (`WEB_AUTH`, `BIND`, `PORT`, `POLAR_DOCTOR_BOAT`) :
@@ -13,6 +13,11 @@ Toutes les modifications notables du projet seront documentées dans ce fichier.
 ### Corrigé
 - 🐛 Zéro warning de compilation ; `/api/config` refuse un chemin de `boat.cfg` trop long au
   lieu de le tronquer.
+
+### Documentation
+- 📖 README : où mettre le mot de passe (Linux service / à la main, Windows) et section
+  *Fichiers de configuration* (`web.conf`, `/etc/default`, `web_secret`, `recent_boats`,
+  `boat.cfg`, `.pol`).
 
 ## [2.0.0] - 2026-09-18
 
