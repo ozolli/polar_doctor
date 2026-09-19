@@ -2,7 +2,7 @@
 
 Toutes les modifications notables du projet seront documentées dans ce fichier.
 
-## [Non publié]
+## [2.1.1] - 2026-09-19
 
 ### Corrigé
 - 🐛 Source VDR sous Windows : `vdr.db` proposé par défaut depuis le dossier `vdrs` de
