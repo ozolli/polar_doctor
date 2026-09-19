@@ -179,6 +179,65 @@ variable d'environnement `WEB_AUTH`. En cas de réglages multiples, l'ordre de p
 | `PORT` | port d'écoute | `8081` |
 | `POLAR_DOCTOR_BOAT` | bateau ouvert au démarrage | le plus récent |
 
+## ⚙️ Fichiers de configuration
+
+| Fichier | Emplacement | Rôle |
+|---------|-------------|------|
+| `web.conf` | Linux : `~/.config/polar_doctor/web.conf`<br>Windows : `%LOCALAPPDATA%\polar_doctor\web.conf` | réglages du serveur : mot de passe, adresse, port, bateau (voir ci-dessus). Créé commenté au premier lancement sous Windows ; à créer sous Linux (`chmod 600`) |
+| `polar_doctor_web` | Linux : `/etc/default/polar_doctor_web` | réglages du **service systemd** (mêmes clés), root 0600. Créé par `sudo make install` |
+| `web_secret` | même dossier que `web.conf` | clé des cookies de connexion, créée automatiquement. **Le supprimer déconnecte tous les appareils** |
+| `recent_boats` | même dossier que `web.conf` | les 8 derniers bateaux ouverts, un chemin par ligne. Le premier est rouvert au démarrage |
+| `boat.cfg` | dans le **dossier du bateau** | nom, inventaire des voiles, états de mer, mots-clés moteur, polaires et leurs critères. Édité par l'onglet **Bateau** |
+| `*.pol` | dans le **dossier du bateau** | les polaires (format ci-dessous) ; `<nom>.pol` pour chaque polaire définie dans `boat.cfg` |
+
+Le service systemd tourne sous votre utilisateur : ses `web_secret` et `recent_boats` sont
+donc dans votre `~/.config/polar_doctor/`. S'il existe aussi un `web.conf`, les valeurs de
+`/etc/default/polar_doctor_web` passent devant (variables d'environnement et ligne de commande
+du service).
+
+### `boat.cfg`
+
+Format INI, écrit par l'onglet *Bateau* mais modifiable à la main (les lignes `#` ou `;` sont
+des commentaires, perdus si on enregistre ensuite depuis l'onglet) :
+
+```ini
+[boat]
+name = O3
+
+[mainsail]
+GV
+1R
+2R
+
+[headsails]
+J1
+J3
+Code0
+
+[seastates]
+Calme
+Belle
+Agitée
+
+[engine]
+moteur = Moteur
+charge = Charge
+
+[polars]
+Pres = mains: GV, 1R, 2R ; heads: J1, J3 ; seas: *
+Portant = mains: GV, 1R ; heads: Code0 ; seas: *
+```
+
+- `[mainsail]`, `[headsails]`, `[seastates]` : un terme par ligne. Sans `[seastates]`,
+  l'échelle **Douglas** est utilisée.
+- `[engine]` : mots-clés cherchés dans le **commentaire VDR** — `moteur` exclut les points,
+  `charge` (moteur débrayé) les garde.
+- `[polars]` : `<nom> = mains: … ; heads: … ; seas: …`, `*` = tous. Chaque polaire est le
+  fichier `<nom>.pol` du dossier.
+
+En capture live, chaque point alimente **toutes** les polaires dont les critères correspondent à
+l'état courant (grand-voile, voile d'avant, mer), sans distinction de majuscules.
+
 ## 📊 Format des fichiers
 
 ### Fichiers NMEA
