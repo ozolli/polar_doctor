@@ -2,6 +2,13 @@
 
 Toutes les modifications notables du projet seront documentées dans ce fichier.
 
+## [Non publié]
+
+### Ajouté
+- ✅ Capture live : la carte Live signale quand l'état (GV / voile d'avant / mer) ne correspond
+  à aucune polaire, ou seulement à d'autres que celle affichée — le compteur restait à 0 sans
+  explication.
+
 ## [2.1.1] - 2026-09-19
 
 ### Corrigé

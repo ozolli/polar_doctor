@@ -365,8 +365,8 @@ static const char PAGE[] =
 "const _fetch=window.fetch;window.fetch=async(...a)=>{const r=await _fetch(...a);if(r.status===401)location.href='/';return r;};\n"  /* session expirée -> connexion */
 "let lang=localStorage.getItem('lang')||((navigator.language||'fr').toLowerCase().startsWith('fr')?'fr':'en');\n"
 "let theme=localStorage.getItem('theme')||((window.matchMedia&&matchMedia('(prefers-color-scheme: light)').matches)?'light':'dark');\n"
-"const L={fr:{boat:'Bateau',range:'Plage TWS',from:'De',to:'à',legend:'Légende (TWS)',kn:'nœuds',empty:'Aucune polaire chargée.',max:'Vitesse max',dyn:'Mode dynamique',dyn_on:'Activer',tws1:'TWS',live:'Live',source:'Source',start:'Démarrer',stop:'Arrêter',moteur:'Moteur',main1:'GV',head1:'Voile av.',sea1:'Mer',tabdiag:'Diagramme',tabdata:'Données',save1:'Enregistrer',addtwa:'+ TWA',addtws:'+ TWS',import:'Import fichiers',create1:'Créer',update1:'Mettre à jour',tabvmg:'VMG',vmgup:'Près',vmgdn:'Portant',recent:'Récents',open1:'Ouvrir',new1:'Nouveau',tabcfg:'Bateau',addpolar:'+ Polaire',cfgname:'Nom',charge1:'Charge',polars1:'Polaires',orphan:'Absent de l’inventaire — décochez pour le retirer',orphhint:'⚠ En orange : critères absents de l’inventaire. Décochez-les pour les retirer, ou ajoutez-les à l’inventaire.'},\n"
-"en:{boat:'Boat',range:'TWS range',from:'From',to:'to',legend:'Legend (TWS)',kn:'knots',empty:'No polar loaded.',max:'Max speed',dyn:'Dynamic mode',dyn_on:'Enable',tws1:'TWS',live:'Live',source:'Source',start:'Start',stop:'Stop',moteur:'Engine',main1:'Main',head1:'Headsail',sea1:'Sea',tabdiag:'Diagram',tabdata:'Data',save1:'Save',addtwa:'+ TWA',addtws:'+ TWS',import:'Import files',create1:'Create',update1:'Update',tabvmg:'VMG',vmgup:'Upwind',vmgdn:'Downwind',recent:'Recent',open1:'Open',new1:'New',tabcfg:'Boat',addpolar:'+ Polar',cfgname:'Name',charge1:'Charge',polars1:'Polars',orphan:'Not in the inventory — uncheck to remove it',orphhint:'⚠ In orange: criteria not in the inventory. Uncheck them to remove them, or add them to the inventory.'}};\n"
+"const L={fr:{boat:'Bateau',range:'Plage TWS',from:'De',to:'à',legend:'Légende (TWS)',kn:'nœuds',empty:'Aucune polaire chargée.',max:'Vitesse max',dyn:'Mode dynamique',dyn_on:'Activer',tws1:'TWS',live:'Live',source:'Source',start:'Démarrer',stop:'Arrêter',moteur:'Moteur',main1:'GV',head1:'Voile av.',sea1:'Mer',tabdiag:'Diagramme',tabdata:'Données',save1:'Enregistrer',addtwa:'+ TWA',addtws:'+ TWS',import:'Import fichiers',create1:'Créer',update1:'Mettre à jour',tabvmg:'VMG',vmgup:'Près',vmgdn:'Portant',recent:'Récents',open1:'Ouvrir',new1:'Nouveau',tabcfg:'Bateau',addpolar:'+ Polaire',cfgname:'Nom',charge1:'Charge',polars1:'Polaires',orphan:'Absent de l’inventaire — décochez pour le retirer',orphhint:'⚠ En orange : critères absents de l’inventaire. Décochez-les pour les retirer, ou ajoutez-les à l’inventaire.',nomatch:'l’état (GV / voile d’avant / mer) ne correspond pas aux critères de la polaire affichée',nmatch1:'— les points vont dans %n autre(s) polaire(s)'},\n"
+"en:{boat:'Boat',range:'TWS range',from:'From',to:'to',legend:'Legend (TWS)',kn:'knots',empty:'No polar loaded.',max:'Max speed',dyn:'Dynamic mode',dyn_on:'Enable',tws1:'TWS',live:'Live',source:'Source',start:'Start',stop:'Stop',moteur:'Engine',main1:'Main',head1:'Headsail',sea1:'Sea',tabdiag:'Diagram',tabdata:'Data',save1:'Save',addtwa:'+ TWA',addtws:'+ TWS',import:'Import files',create1:'Create',update1:'Update',tabvmg:'VMG',vmgup:'Upwind',vmgdn:'Downwind',recent:'Recent',open1:'Open',new1:'New',tabcfg:'Boat',addpolar:'+ Polar',cfgname:'Name',charge1:'Charge',polars1:'Polars',orphan:'Not in the inventory — uncheck to remove it',orphhint:'⚠ In orange: criteria not in the inventory. Uncheck them to remove them, or add them to the inventory.',nomatch:'the state (main / headsail / sea) does not match the displayed polar’s criteria',nmatch1:'— points go to %n other polar(s)'}};\n"
 "const T=k=>(L[lang]&&L[lang][k]!=null)?L[lang][k]:k;\n"
 "function i18n(){document.querySelectorAll('[data-i18n]').forEach(e=>e.textContent=T(e.dataset.i18n));document.documentElement.lang=lang;}\n"
 "const $=s=>document.querySelector(s);\n"
@@ -448,7 +448,9 @@ static const char PAGE[] =
 "function startPoll(){if(!liveTimer)liveTimer=setInterval(pollLive,1000);}\n"
 "function stopPoll(){if(liveTimer){clearInterval(liveTimer);liveTimer=null;}}\n"
 "async function pollLive(){try{LIVE=await fetch('/api/live').then(r=>r.json());}catch(e){LIVE=null;}\n"
-" if(LIVE&&LIVE.on)$('#lvinfo').textContent='● live · '+LIVE.count+' pts'+(LIVE.cur?(' · TWA '+Math.round(LIVE.cur[0])+'° · BS '+LIVE.cur[1].toFixed(2)):'');\n"
+" if(LIVE&&LIVE.on){let t='● live · '+LIVE.count+' pts'+(LIVE.cur?(' · TWA '+Math.round(LIVE.cur[0])+'° · BS '+LIVE.cur[1].toFixed(2)):'');\n"
+"  if(LIVE.routing&&!LIVE.dmatch)t+=' · ⚠ '+T('nomatch')+(LIVE.nmatch?(' '+T('nmatch1').replace('%n',LIVE.nmatch)):'');\n"
+"  $('#lvinfo').textContent=t;}\n"
 " else $('#lvinfo').textContent=(LIVE&&LIVE.err)?('⚠ '+LIVE.err):(LIVE&&LIVE.saved)?('✓ '+LIVE.saved.split('/').pop()):'';\n"
 " const on=!!(LIVE&&LIVE.on);$('#lvbtn').textContent=on?T('stop'):T('start');$('#lvbtn').dataset.on=on?'1':'';\n"
 " const mot=!!(LIVE&&LIVE.moteur);$('#lvmot').dataset.on=mot?'1':'';$('#lvmot').style.background=mot?'var(--active)':'';$('#lvmot').style.color=mot?'#fff':'';\n"
@@ -548,7 +550,7 @@ static const char PAGE[] =
 "</ul>\n"
 "<h3>Capture live</h3>\n"
 "<p>Carte <b>Live</b> : choisissez la source — <b>UDP</b> (port d'écoute), <b>TCP</b> (hôte:port) ou <b>VDR qtVlm</b> (chemin du .db) ou <b>Actisense NGX-1</b> (port série : <code>/dev/ttyUSB0</code>, <code>COM3</code>, <code>@230400</code> pour changer de débit ; passerelle en mode Transfer) — puis <b>Démarrer</b>. En UDP/TCP, le format est reconnu tout seul : <b>NMEA 0183</b> ou <b>NMEA 2000</b> au format texte YDRAW (n2k-mux port 2700, passerelles Yacht Devices).</p>\n"
-"<p>Réglez en direct l'état du bateau (grand-voile, voile d'avant, état de mer) : chaque point est routé vers <b>toutes</b> les polaires dont les critères correspondent. Le bouton <b>Moteur</b> suspend l'enregistrement quand l'hélice est embrayée.</p>\n"
+"<p>Réglez en direct l'état du bateau (grand-voile, voile d'avant, état de mer) : chaque point est routé vers <b>toutes</b> les polaires dont les critères correspondent. Si l'état ne correspond à <b>aucune</b> polaire, rien n'est enregistré — le compteur reste à 0 et la carte Live l'indique. Le compteur et le nuage ne montrent que la polaire <b>affichée</b>. Le bouton <b>Moteur</b> suspend l'enregistrement quand l'hélice est embrayée.</p>\n"
 "<p>Le nuage gris montre les points bruts, le point rouge la mesure courante, et la courbe se construit sous vos yeux. À l'<b>arrêt</b>, chaque polaire alimentée est enregistrée.</p>\n"
 "<h3>Comment c'est calculé</h3>\n"
 "<ul>\n"
@@ -599,7 +601,7 @@ static const char PAGE[] =
 "</ul>\n"
 "<h3>Live capture</h3>\n"
 "<p><b>Live</b> card: choose the source — <b>UDP</b> (listening port), <b>TCP</b> (host:port) or <b>qtVlm VDR</b> (path to the .db) or <b>Actisense NGX-1</b> (serial port: <code>/dev/ttyUSB0</code>, <code>COM3</code>, <code>@230400</code> to change the baud rate; gateway in Transfer mode) — then <b>Start</b>. Over UDP/TCP the format is detected automatically: <b>NMEA 0183</b> or <b>NMEA 2000</b> as YDRAW text (n2k-mux port 2700, Yacht Devices gateways).</p>\n"
-"<p>Set the boat state live (mainsail, headsail, sea state): every point is routed to <b>all</b> the polars whose criteria match. The <b>Engine</b> button suspends recording while the propeller is engaged.</p>\n"
+"<p>Set the boat state live (mainsail, headsail, sea state): every point is routed to <b>all</b> the polars whose criteria match. If the state matches <b>no</b> polar, nothing is recorded — the counter stays at 0 and the Live card says so. Counter and scatter only show the <b>displayed</b> polar. The <b>Engine</b> button suspends recording while the propeller is engaged.</p>\n"
 "<p>The grey cloud shows raw points, the red dot the current measurement, and the curve builds up as you sail. On <b>Stop</b>, every polar that received data is saved.</p>\n"
 "<h3>How it is computed</h3>\n"
 "<ul>\n"
@@ -1372,6 +1374,18 @@ static void serve_live(int fd)
     n += (size_t)w; } while (0)
     APP("{\"on\":%s,\"src\":%d,\"count\":%ld,", g_live_on ? "true" : "false", g_live_src, g_live_count);
     { char e[400]; json_escape(g_live_err, e, sizeof e); APP("\"err\":\"%s\",", e); }
+    {   /* Routage : l'état courant (GV/voile/mer) alimente-t-il la polaire affichée,
+         * et sinon combien d'autres ? Sans cela, « 0 pts » reste inexpliqué. */
+        int nmatch = 0, dmatch = 0;
+        if (g_routing)
+            for (int k = 0; k < g_ng; k++)
+                if (polar_def_matches(&g_boat_config.polars[k], g_cur_main, g_cur_head, g_cur_sea)) {
+                    nmatch++;
+                    if (k == g_disp) dmatch = 1;
+                }
+        APP("\"routing\":%s,\"nmatch\":%d,\"dmatch\":%s,",
+            g_routing ? "true" : "false", nmatch, dmatch ? "true" : "false");
+    }
     {   /* VDR qtVlm proposé par défaut, seulement s'il existe : ~/.qtVlm/vdrs/vdr.db
          * (Linux), ou le dossier vdrs de l'installation qtVlm sous Windows
          * (%ProgramFiles%\\qtVlm\\vdrs). */
