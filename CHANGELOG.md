@@ -2,7 +2,7 @@
 
 Toutes les modifications notables du projet seront documentées dans ce fichier.
 
-## [Non publié]
+## [2.1.4] - 2026-09-20
 
 ### Corrigé
 - 📖 Manuels : le paragraphe sur les formats importables ne disait pas ce qu'il advient d'une
