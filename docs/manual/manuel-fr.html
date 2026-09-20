@@ -1,0 +1,670 @@
+<!DOCTYPE html>
+<html lang="fr"><head><meta charset="utf-8"><title>Polar Doctor — Manuel</title>
+<link rel="stylesheet" href="style.css"></head><body>
+
+<h1 class="first">1. Présentation</h1>
+
+<p><strong>Polar Doctor</strong> fabrique, édite et analyse les <strong>polaires de performance</strong>
+d'un voilier à partir de vos données de navigation réelles : fichiers de log NMEA 0183, bases VDR
+enregistrées par qtVlm, flux NMEA 2000, ou capture en direct pendant que vous naviguez.</p>
+
+<p>Depuis la version 2.0, c'est une <strong>application web</strong>. Un petit serveur,
+<code>polar_doctor_web</code>, tourne sur l'ordinateur de bord ; l'interface s'ouvre dans
+n'importe quel navigateur, à la table à carte comme sur une tablette au cockpit. Il n'y a rien à
+installer sur les appareils clients.</p>
+
+<h2>1.1 Qu'est-ce qu'une polaire ?</h2>
+
+<p>La polaire d'un voilier est un tableau — et un diagramme — qui donne la <strong>vitesse du
+bateau</strong> pour chaque combinaison d'<strong>angle</strong> et de <strong>force</strong> du
+vent réel. C'est la carte d'identité de performance du bateau. Les logiciels de routage s'en
+servent pour calculer une route ; à bord, elle sert à savoir si l'on navigue au potentiel du
+bateau, et à comparer des réglages.</p>
+
+<p>Une polaire fournie par un chantier est théorique : elle décrit un bateau neuf, à l'état lège,
+mené par un équipage entraîné, sur une mer plate. Celle que fabrique Polar Doctor décrit
+<em>votre</em> bateau tel qu'il navigue réellement, avec son chargement, ses voiles et son
+équipage.</p>
+
+<h2>1.2 Vocabulaire</h2>
+
+<table>
+<tr><th>Sigle</th><th>Signification</th></tr>
+<tr><td><strong>TWA</strong></td><td><em>True Wind Angle</em> — angle du vent réel par rapport à l'axe du bateau, de 0° (vent debout) à 180° (vent arrière).</td></tr>
+<tr><td><strong>TWS</strong></td><td><em>True Wind Speed</em> — force du vent réel, en nœuds.</td></tr>
+<tr><td><strong>STW</strong> / <strong>BSP</strong></td><td><em>Speed Through Water</em> — vitesse du bateau dans l'eau, mesurée au loch. C'est ce que la polaire représente.</td></tr>
+<tr><td><strong>SOG</strong></td><td><em>Speed Over Ground</em> — vitesse par rapport au fond, donnée par le GPS. Sert à fiabiliser le STW.</td></tr>
+<tr><td><strong>VMG</strong></td><td><em>Velocity Made Good</em> — part de la vitesse gagnée dans l'axe du vent. Mesure l'efficacité au près et au portant.</td></tr>
+<tr><td><strong>AWA</strong> / <strong>AWS</strong></td><td>Angle et vitesse du vent <strong>apparent</strong>, celui que l'on ressent à bord.</td></tr>
+</table>
+
+<h2>1.3 Ce que fait le programme, en résumé</h2>
+
+<ol>
+<li>Il lit vos données : fichiers de log, base VDR, ou flux en direct.</li>
+<li>Il ne garde que les moments utiles : moteur exclu, sauts du loch rejetés, mesures lissées.</li>
+<li>Il range chaque mesure dans une case de 5° d'angle sur 2 nœuds de vent.</li>
+<li>Pour chaque case, il retient un <strong>percentile haut</strong> des vitesses observées
+(P90 par défaut) : la performance <em>atteignable</em>, pas la moyenne.</li>
+<li>Il enregistre le résultat dans un fichier <code>.pol</code> lisible par qtVlm et les autres
+logiciels de routage.</li>
+</ol>
+
+<figure>
+<img src="img/diagram-fr.png" alt="Fenêtre principale">
+<figcaption>La fenêtre principale : diagramme polaire, sélection du bateau, plage de vent, carte Live et légende.</figcaption>
+</figure>
+
+<h1>2. Installation</h1>
+
+<p>Polar Doctor fonctionne sous <strong>Linux</strong> (x86-64 et ARM64, donc aussi sur Raspberry
+Pi) et sous <strong>Windows</strong> (64 bits). Le serveur n'a besoin que de deux bibliothèques,
+GLib et SQLite ; il n'utilise aucun environnement graphique.</p>
+
+<h2>2.1 Binaires prêts à l'emploi</h2>
+
+<p>La page <em>Releases</em> du dépôt
+(<code>https://github.com/ozolli/polar_doctor/releases</code>) fournit :</p>
+<ul>
+<li><code>polar_doctor-linux-x64.tar.gz</code> — Linux 64 bits ;</li>
+<li><code>polar_doctor-linux-arm64.tar.gz</code> — Linux ARM64 (Raspberry Pi) ;</li>
+<li><code>polar_doctor-windows-x64.zip</code> — Windows 64 bits, exécutable et bibliothèques,
+rien à installer.</li>
+</ul>
+
+<p>Chaque archive a un fichier <code>.sha256</code> permettant d'en vérifier l'intégrité :</p>
+<pre>sha256sum -c polar_doctor-linux-x64.tar.gz.sha256</pre>
+
+<h3>Linux</h3>
+<pre>tar -xzf polar_doctor-linux-x64.tar.gz
+cd polar_doctor-linux-x64
+./polar_doctor_web ~/Bateaux/MonBateau</pre>
+<p>Puis ouvrez <code>http://localhost:8081</code> dans un navigateur.</p>
+
+<h3>Windows</h3>
+<ol>
+<li>Décompressez <code>polar_doctor-windows-x64.zip</code> dans un dossier de votre choix.</li>
+<li>Double-cliquez sur <code>polar_doctor_web.exe</code>. Une fenêtre de console s'ouvre et
+affiche l'adresse d'écoute.</li>
+<li>Ouvrez <code>http://localhost:8081</code>.</li>
+</ol>
+<p>Pour ouvrir un bateau au démarrage, lancez le programme avec le dossier en argument, par
+exemple depuis l'invite de commandes :</p>
+<pre>polar_doctor_web.exe C:\Bateaux\MonBateau</pre>
+
+<h2>2.2 Compilation depuis les sources</h2>
+
+<h3>Linux (Debian, Ubuntu, Raspberry Pi OS)</h3>
+<pre>sudo apt install build-essential pkg-config libglib2.0-dev libsqlite3-dev
+git clone https://github.com/ozolli/polar_doctor.git
+cd polar_doctor
+make
+./polar_doctor_web ~/Bateaux/MonBateau</pre>
+
+<h3>Windows (MSYS2)</h3>
+<p>Installez MSYS2, puis dans un terminal <em>MINGW64</em> :</p>
+<pre>pacman -S --needed make mingw-w64-x86_64-gcc mingw-w64-x86_64-pkgconf \
+          mingw-w64-x86_64-glib2 mingw-w64-x86_64-sqlite3
+make</pre>
+<p>Pour distribuer l'exécutable hors de MSYS2, copiez à côté de lui les bibliothèques qu'il
+utilise :</p>
+<pre>ldd polar_doctor_web.exe | grep -i /mingw64/ | awk '{print $3}' | xargs -I {} cp {} dist/</pre>
+
+<h3>Tests</h3>
+<p><code>make test</code> compile et exécute les tests unitaires du cœur (décodage NMEA 2000,
+protocole Actisense). Ils doivent tous afficher <em>OK</em>.</p>
+
+<h2>2.3 Démarrage automatique (service systemd, Linux)</h2>
+
+<p>Pour que Polar Doctor démarre avec l'ordinateur de bord et reste accessible depuis le
+réseau :</p>
+<pre>make                 # en utilisateur normal, jamais sous sudo
+sudo make install    # installe le binaire et le service pour cet utilisateur
+sudo systemctl enable --now polar_doctor_web</pre>
+
+<p><code>sudo make install</code> :</p>
+<ul>
+<li>copie le binaire dans <code>/usr/local/bin/</code> ;</li>
+<li>installe <code>/etc/systemd/system/polar_doctor_web.service</code>, réglé pour tourner sous
+<strong>votre</strong> compte (pas root) ;</li>
+<li>crée <code>/etc/default/polar_doctor_web</code> (droits 600) s'il n'existe pas ;</li>
+<li>ne remplace jamais un <code>/etc/default/polar_doctor_web</code> existant : vos réglages et
+votre mot de passe sont conservés lors des mises à jour.</li>
+</ul>
+
+<p>Le service écoute sur toutes les interfaces, port 8081, et rouvre au démarrage le dernier
+bateau utilisé. Commandes utiles :</p>
+<pre>sudo systemctl status polar_doctor_web     # état
+sudo systemctl restart polar_doctor_web    # après une mise à jour
+journalctl -u polar_doctor_web -f          # journal en direct</pre>
+
+<div class="note"><strong>Mise à jour.</strong> Après un <code>git pull</code> :
+<code>make &amp;&amp; sudo make install &amp;&amp; sudo systemctl restart polar_doctor_web</code>.
+Vos polaires, votre configuration et votre mot de passe ne sont pas touchés.</div>
+
+<h1>3. Accès, mot de passe et fichiers de réglages</h1>
+
+<p>L'interface <strong>écrit</strong> des fichiers sur le serveur (polaires, configuration du
+bateau), crée des dossiers et lit des chemins que vous lui indiquez. L'exposer au réseau sans
+protection reviendrait à donner ces droits à tout le réseau.</p>
+
+<ul>
+<li>En local (adresse <code>127.0.0.1</code>, le réglage par défaut), aucun mot de passe n'est
+demandé.</li>
+<li>Pour écouter sur le réseau, un mot de passe est <strong>obligatoire</strong> : sans lui, le
+serveur refuse de démarrer, à moins qu'on lui passe explicitement
+<code>--allow-anonymous</code>.</li>
+</ul>
+
+<h2>3.1 Où mettre le mot de passe</h2>
+
+<p>Il prend toujours la forme <code>WEB_AUTH=utilisateur:motdepasse</code>, et ne se donne
+jamais sur la ligne de commande (celle-ci est lisible par les autres utilisateurs de la
+machine).</p>
+
+<h3>Linux, en service</h3>
+<pre>sudo nano /etc/default/polar_doctor_web     # WEB_AUTH=moi:MonMotDePasse
+sudo systemctl restart polar_doctor_web</pre>
+
+<h3>Linux, lancé à la main</h3>
+<pre>read -rsp 'Mot de passe : ' P; echo
+WEB_AUTH="moi:$P" ./polar_doctor_web ~/Bateaux/MonBateau --bind 0.0.0.0</pre>
+
+<h3>Windows</h3>
+<p>Le serveur crée à son premier lancement un fichier de réglages tout commenté et affiche son
+chemin. Ouvrez-le (touche Windows + R) :</p>
+<pre>notepad %LOCALAPPDATA%\polar_doctor\web.conf</pre>
+<p>puis enlevez le <code>#</code> devant les lignes utiles :</p>
+<pre>WEB_AUTH=moi:MonMotDePasse
+BIND=0.0.0.0</pre>
+<p>Relancez <code>polar_doctor_web.exe</code>. Au premier accès réseau, le pare-feu Windows
+demande d'autoriser le programme.</p>
+
+<h2>3.2 Le fichier <code>web.conf</code></h2>
+
+<p>Mêmes clés sur les deux systèmes. Le fichier se trouve dans
+<code>%LOCALAPPDATA%\polar_doctor\web.conf</code> sous Windows et
+<code>~/.config/polar_doctor/web.conf</code> sous Linux ; l'option <code>--config FICHIER</code>
+permet d'en désigner un autre.</p>
+
+<table>
+<tr><th>Clé</th><th>Rôle</th><th>Défaut</th></tr>
+<tr><td><code>WEB_AUTH</code></td><td>identifiants <code>utilisateur:motdepasse</code>, obligatoires hors de <code>127.0.0.1</code></td><td>—</td></tr>
+<tr><td><code>BIND</code></td><td>adresse d'écoute ; <code>0.0.0.0</code> = tout le réseau</td><td><code>127.0.0.1</code></td></tr>
+<tr><td><code>PORT</code></td><td>port d'écoute</td><td><code>8081</code></td></tr>
+<tr><td><code>POLAR_DOCTOR_BOAT</code></td><td>bateau ouvert au démarrage</td><td>le plus récent</td></tr>
+</table>
+
+<p>Ordre de priorité, du plus fort au plus faible : <strong>ligne de commande</strong>, puis
+<strong>variables d'environnement</strong>, puis <strong>web.conf</strong>. Sous Linux, un
+<code>web.conf</code> contenant un mot de passe doit être lisible par son seul propriétaire
+(<code>chmod 600</code>) ; sinon le serveur refuse de démarrer.</p>
+
+<h2>3.3 Se connecter</h2>
+
+<p>Quand un mot de passe est configuré, le navigateur affiche une page de connexion.</p>
+
+<figure>
+<img src="img/login-fr.png" alt="Page de connexion" style="max-width:52%">
+<figcaption>La page de connexion. Un cookie garde la session ouverte un an sur l'appareil.</figcaption>
+</figure>
+
+<p>Après connexion, un cookie est déposé sur l'appareil (valable un an, non accessible aux
+scripts, non envoyé aux autres sites). Il n'y a donc pas à retaper le mot de passe à chaque
+visite. Changer le mot de passe déconnecte tous les appareils. Le bouton de déconnexion se
+trouve en haut à droite de l'interface.</p>
+
+<div class="note">Pour les scripts, l'authentification HTTP classique reste acceptée :
+<code>curl -u moi:MonMotDePasse http://bateau:8081/api/polar</code>.</div>
+
+<h2>3.4 Tous les fichiers de Polar Doctor</h2>
+
+<table>
+<tr><th>Fichier</th><th>Emplacement</th><th>Rôle</th></tr>
+<tr><td><code>web.conf</code></td><td>Linux : <code>~/.config/polar_doctor/</code><br>Windows : <code>%LOCALAPPDATA%\polar_doctor\</code></td><td>réglages du serveur</td></tr>
+<tr><td><code>polar_doctor_web</code></td><td><code>/etc/default/</code> (Linux)</td><td>réglages du service systemd, droits 600</td></tr>
+<tr><td><code>web_secret</code></td><td>à côté de <code>web.conf</code></td><td>clé des cookies de connexion. Le supprimer déconnecte tous les appareils</td></tr>
+<tr><td><code>recent_boats</code></td><td>à côté de <code>web.conf</code></td><td>les huit derniers bateaux ouverts</td></tr>
+<tr><td><code>boat.cfg</code></td><td>dossier du bateau</td><td>inventaire et définition des polaires</td></tr>
+<tr><td><code>*.pol</code></td><td>dossier du bateau</td><td>les polaires elles-mêmes</td></tr>
+</table>
+
+<h1>4. Prise en main</h1>
+
+<p>Un <strong>bateau</strong>, pour Polar Doctor, est un simple <strong>dossier</strong>
+contenant un fichier de configuration <code>boat.cfg</code> et une ou plusieurs polaires
+<code>.pol</code>. Rien d'autre n'est nécessaire, et le dossier peut être copié ou sauvegardé
+comme n'importe quel dossier.</p>
+
+<h2>4.1 Créer un bateau</h2>
+
+<p>Dans la carte <strong>Bateau</strong>, en haut à droite :</p>
+<ol>
+<li>tapez le chemin du dossier à créer dans le champ de saisie — par exemple
+<code>/home/marin/Bateaux/Bon Vent</code> ou <code>C:\Bateaux\Bon Vent</code> ;</li>
+<li>indiquez le nom du bateau dans le champ <em>Nom</em> ;</li>
+<li>cliquez sur <strong>Nouveau</strong>.</li>
+</ol>
+<p>Le dossier est créé, avec un <code>boat.cfg</code> par défaut et une polaire vide. Le bateau
+est ouvert immédiatement.</p>
+
+<h2>4.2 Ouvrir un bateau existant</h2>
+
+<p>Saisissez son dossier puis <strong>Ouvrir</strong>, ou choisissez-le dans la liste
+<strong>Récents</strong>, qui garde les huit derniers. Le bateau ouvert est aussi celui que le
+serveur rouvrira à son prochain démarrage — pratique pour un service qui redémarre avec le
+bateau.</p>
+
+<p>On peut aussi ouvrir directement un fichier <code>.pol</code> isolé, sans dossier bateau :
+<code>./polar_doctor_web polaire.pol</code>. Les fonctions liées au bateau (inventaire,
+polaires multiples, routage en direct) ne sont alors pas disponibles.</p>
+
+<h2>4.3 L'écran en un coup d'œil</h2>
+
+<ul>
+<li>En haut : le nom du fichier ouvert, les quatre onglets
+(<strong>Diagramme</strong>, <strong>Données</strong>, <strong>VMG</strong>,
+<strong>Bateau</strong>), et à droite les boutons <strong>?</strong> (aide),
+impression, <strong>FR/EN</strong> et thème clair/sombre.</li>
+<li>À gauche : la vue principale, selon l'onglet choisi.</li>
+<li>À droite : les cartes <strong>Bateau</strong>, <strong>Plage TWS</strong>,
+<strong>Mode dynamique</strong>, <strong>Live</strong> et <strong>Légende</strong>.</li>
+</ul>
+
+<p>La langue et le thème sont mémorisés par le navigateur, appareil par appareil : la tablette
+du cockpit peut être en thème sombre pendant que le PC de la table à carte reste en clair.</p>
+
+<h1>5. Décrire le bateau</h1>
+
+<p>L'onglet <strong>Bateau</strong> décrit l'inventaire du bord et les polaires que vous voulez
+tenir. C'est ce qui permet de ranger automatiquement chaque mesure dans la bonne polaire pendant
+une capture en direct.</p>
+
+<figure>
+<img src="img/boat-fr.png" alt="Onglet Bateau">
+<figcaption>L'onglet Bateau : nom, inventaire (grand-voile, voiles d'avant, états de mer), mots-clés moteur et polaires.</figcaption>
+</figure>
+
+<h2>5.1 Inventaire</h2>
+
+<ul>
+<li><strong>GV</strong> : les états de grand-voile, un par ligne — par exemple
+<code>GV</code>, <code>1R</code>, <code>2R</code>, <code>3R</code>.</li>
+<li><strong>Voile av.</strong> : les voiles d'avant — <code>J1</code>, <code>J3</code>,
+<code>Code0</code>, <code>Spi</code>…</li>
+<li><strong>Mer</strong> : les états de mer. Par défaut, l'échelle Douglas en français
+(<em>Calme</em>, <em>Ridée</em>, <em>Belle</em>, <em>Peu agitée</em>, <em>Agitée</em>…).</li>
+<li><strong>Moteur</strong> : les deux mots-clés cherchés dans les commentaires d'une base VDR —
+l'un signifie que l'hélice est embrayée (les points sont écartés), l'autre que le moteur tourne
+au point mort pour charger les batteries (les points sont conservés, car le bateau avance bien à
+la voile).</li>
+</ul>
+
+<h2>5.2 Polaires et critères</h2>
+
+<p>Chaque polaire porte un nom — qui est aussi le nom de son fichier, <code>Pres.pol</code>,
+<code>Portant.pol</code> — et des <strong>critères</strong> sous forme de cases à cocher :
+quelles grand-voiles, quelles voiles d'avant, quels états de mer la concernent.</p>
+
+<div class="note"><strong>Ne rien cocher signifie « tout ».</strong> Une polaire sans aucun
+critère coché accepte toutes les conditions. C'est le bon réglage si vous ne tenez qu'une seule
+polaire pour le bateau.</div>
+
+<p>Un critère écrit dans <code>boat.cfg</code> mais absent de l'inventaire est affiché en
+orange : soit vous l'ajoutez à l'inventaire, soit vous le décochez pour le supprimer.</p>
+
+<p><strong>Enregistrer</strong> réécrit <code>boat.cfg</code>. Le fichier est d'abord relu et
+vérifié : s'il est incohérent, l'ancien est conservé. Les commentaires que vous auriez ajoutés à
+la main dans <code>boat.cfg</code> disparaissent lors d'un enregistrement depuis l'interface.</p>
+
+<h1>6. Construire une polaire depuis des fichiers</h1>
+
+<p>Onglet <strong>Données</strong>, cadre <strong>Import fichiers</strong>. Indiquez les fichiers
+à lire, <strong>un chemin par ligne</strong>. Ce sont des chemins <em>sur le serveur</em>, pas
+sur l'appareil qui affiche l'interface : il n'y a pas d'envoi de fichier.</p>
+
+<figure>
+<img src="img/data-fr.png" alt="Onglet Données">
+<figcaption>L'onglet Données : import de fichiers, choix du percentile, et tableau modifiable de la polaire.</figcaption>
+</figure>
+
+<h2>6.1 Formats acceptés</h2>
+
+<ul>
+<li><strong>NMEA 0183</strong> (<code>.nmea</code>, <code>.log</code>, <code>.txt</code>) :
+vent <code>MWV</code> ou <code>MWD</code>, vitesse surface <code>VHW</code>, cap
+<code>HDT</code>/<code>HDG</code>, et vitesse fond si elle est présente.</li>
+<li><strong>NMEA 2000</strong> au format texte YDRAW, tel que l'enregistrent les passerelles
+Yacht Devices ou que le publie n2k-mux.</li>
+<li><strong>VDR de qtVlm</strong> (<code>.db</code>) : bases SQLite enregistrées pendant la
+navigation, avec le vent, la vitesse, et éventuellement le régime moteur et des commentaires.</li>
+</ul>
+
+<h2>6.2 Créer ou mettre à jour</h2>
+
+<ul>
+<li><strong>Créer</strong> fabrique une polaire neuve à partir des seuls fichiers indiqués. Elle
+est enregistrée sous un nom horodaté dans le dossier du bateau.</li>
+<li><strong>Mettre à jour</strong> repart de la polaire actuellement sélectionnée, y ajoute les
+nouvelles mesures, et recalcule l'ensemble. La polaire peut donc <strong>monter ou
+baisser</strong> : c'est ce qu'il faut pour ramener progressivement une polaire théorique à la
+réalité du bateau.</li>
+</ul>
+
+<h2>6.3 Le percentile</h2>
+
+<p>Chaque case du tableau (5° d'angle × 2 nœuds de vent) reçoit un grand nombre de mesures. Pour
+n'en garder qu'une, Polar Doctor prend un <strong>percentile haut</strong>, réglable de P85 à
+P95, P90 par défaut.</p>
+
+<ul>
+<li>La <em>moyenne</em> serait tirée vers le bas par les manœuvres, les risées mal négociées ou
+un pilote hésitant.</li>
+<li>Le <em>maximum</em> retiendrait une surventée ou une erreur de mesure.</li>
+<li>Le percentile P90 signifie : « la vitesse que le bateau dépasse une fois sur dix dans ces
+conditions », c'est-à-dire la performance atteignable quand tout est bien réglé.</li>
+</ul>
+
+<p>Abaisser à P85 donne une polaire plus prudente, utile pour du routage hauturier en équipage
+réduit. Monter à P95 donne une polaire de régate, exigeante à tenir. Une case qui contient moins
+de <strong>trois</strong> mesures est laissée vide : on ne fabrique pas une performance à partir
+d'un point isolé.</p>
+
+<h2>6.4 Ce qui est écarté automatiquement</h2>
+
+<ul>
+<li><strong>Moteur</strong> : dans une base VDR, tout point enregistré avec un régime moteur non
+nul est exclu, sauf si le commentaire indique la charge des batteries.</li>
+<li><strong>Sauts du loch</strong> : l'écart entre vitesse surface et vitesse fond est suivi en
+continu ; un écart qui change brutalement (roue à aube bloquée, déjaugeage, bulle d'air) fait
+rejeter la mesure. Un courant, qui varie lentement, est au contraire conservé.</li>
+<li><strong>Bruit</strong> : la vitesse surface des fichiers NMEA est lissée par moyenne
+glissante, remise à zéro à chaque manœuvre pour ne pas lisser au travers d'un virement.</li>
+<li><strong>Valeurs impossibles</strong> : angle hors de 0–180°, vent au-delà de 70 nœuds,
+vitesse au-delà de 50 nœuds, phrases NMEA dont la somme de contrôle est fausse.</li>
+</ul>
+
+<h1>7. Capture en direct</h1>
+
+<p>La carte <strong>Live</strong> construit la polaire pendant que vous naviguez. Choisissez une
+source, une adresse, puis <strong>Démarrer</strong>.</p>
+
+<figure>
+<img src="img/live-fr.png" alt="Capture live">
+<figcaption>Capture en cours : nuage de points, point courant en rouge, polaire qui se construit, et compteur en bas de la carte Live.</figcaption>
+</figure>
+
+<h2>7.1 Les sources</h2>
+
+<table>
+<tr><th>Source</th><th>Adresse à saisir</th><th>Usage</th></tr>
+<tr><td><strong>UDP (0183 / N2K)</strong></td><td>un numéro de port, par exemple <code>10110</code></td><td>écoute les trames diffusées sur le réseau du bord</td></tr>
+<tr><td><strong>TCP (0183 / N2K)</strong></td><td><code>hôte:port</code>, par exemple <code>o3nav.local:2700</code></td><td>se connecte à un multiplexeur ou une passerelle</td></tr>
+<tr><td><strong>VDR qtVlm</strong></td><td>chemin du <code>vdr.db</code></td><td>suit le fichier que qtVlm est en train d'écrire</td></tr>
+<tr><td><strong>Actisense NGX-1 (série)</strong></td><td><code>/dev/ttyUSB0</code>, <code>COM3</code>, éventuellement suivi de <code>@230400</code></td><td>lit directement une passerelle NMEA 2000 branchée en USB</td></tr>
+</table>
+
+<p>En UDP et en TCP, le format est reconnu ligne par ligne : NMEA 0183 et NMEA 2000 (YDRAW)
+peuvent même se mélanger dans le même flux.</p>
+
+<h3>Cas du NMEA 2000</h3>
+<p>Polar Doctor ne se branche pas sur le bus CAN lui-même. Il lui faut :</p>
+<ul>
+<li>soit une passerelle qui publie le N2K sur le réseau au format YDRAW — n2k-mux (port 2700),
+une passerelle Wi-Fi Yacht Devices… ;</li>
+<li>soit une passerelle série Actisense NGX-1 ou NGT-1, branchée en USB et placée en mode
+<strong>Transfer</strong> (données brutes), que Polar Doctor lit directement ;</li>
+<li>soit une passerelle qui traduit le N2K en NMEA 0183 diffusé sur le réseau.</li>
+</ul>
+
+<div class="warn"><strong>Un port série ne s'ouvre qu'une fois.</strong> Si un autre programme
+(n2k-mux, qtVlm) utilise déjà la passerelle USB, Polar Doctor ne pourra pas l'ouvrir : lisez
+plutôt le flux réseau que ce programme publie.</div>
+
+<h3>Droits d'accès au port série, sous Linux</h3>
+<pre>sudo usermod -aG dialout $USER     # puis se reconnecter, ou redémarrer le service</pre>
+<p>Préférez un nom de port stable, du type
+<code>/dev/serial/by-id/usb-Actisense_NGX-1-...</code> : il ne change pas d'un branchement à
+l'autre, contrairement à <code>/dev/ttyUSB0</code>.</p>
+
+<h2>7.2 L'état du bateau</h2>
+
+<p>Sous les boutons de la carte Live, trois listes indiquent la <strong>grand-voile</strong>, la
+<strong>voile d'avant</strong> et l'<strong>état de la mer</strong>. Chaque mesure est rangée
+dans <strong>toutes</strong> les polaires dont les critères correspondent à cet état. Changez
+ces listes à chaque manœuvre : la capture continue, et les points suivants vont dans la bonne
+polaire.</p>
+
+<div class="warn"><strong>Si le compteur reste à 0</strong>, c'est en général que l'état choisi
+ne correspond à aucune polaire — ou seulement à des polaires autres que celle affichée. La carte
+Live l'indique alors explicitement. Rappel : le compteur et le nuage de points ne montrent que
+la polaire <strong>affichée</strong>.</div>
+
+<h2>7.3 Le bouton Moteur</h2>
+
+<p>Quand vous embrayez l'hélice, cliquez sur <strong>Moteur</strong> : la capture continue mais
+les points ne sont plus enregistrés. Recliquez en coupant. Sans cela, quelques heures de moteur
+suffisent à gonfler artificiellement la polaire dans le petit temps.</p>
+
+<h2>7.4 Arrêt et enregistrement</h2>
+
+<p><strong>Arrêter</strong> agrège les mesures et écrit les fichiers :</p>
+<ul>
+<li>avec un bateau et ses polaires : chaque polaire alimentée est mise à jour sur place, en
+repartant de son contenu existant ;</li>
+<li>sans bateau : un fichier horodaté <code>live_AAAAMMJJ_HHMMSS.pol</code> est créé.</li>
+</ul>
+<p>Les noms des fichiers écrits s'affichent sous la carte Live.</p>
+
+<h1>8. Lire le diagramme</h1>
+
+<p>L'onglet <strong>Diagramme</strong> trace la polaire en demi-rose : l'étrave pointe vers le
+haut (0°), le vent arrière est en bas (180°), et les cercles concentriques donnent la vitesse du
+bateau en nœuds.</p>
+
+<ul>
+<li>Une <strong>courbe par force de vent</strong>, avec sa couleur, rappelée dans la légende.</li>
+<li>Les courbes sont lissées ; les points calculés sont les angles présents dans le tableau.</li>
+<li>Les portions tracées en <strong>rouge</strong> signalent les zones où le VMG se dégrade :
+serrer davantage au près, ou abattre davantage au portant, y fait perdre du terrain même si la
+vitesse augmente.</li>
+<li>La carte <strong>Plage TWS</strong> limite l'affichage à une fourchette de vent, pour ne pas
+noyer le diagramme sous vingt courbes.</li>
+</ul>
+
+<h2>8.1 Mode dynamique</h2>
+
+<p>Cochez <strong>Activer</strong> dans la carte <em>Mode dynamique</em> et saisissez une force
+de vent, même absente du tableau : la courbe correspondante est calculée par interpolation.</p>
+
+<figure>
+<img src="img/dyn-fr.png" alt="Mode dynamique">
+<figcaption>Mode dynamique : une seule courbe, interpolée pour la force de vent demandée.</figcaption>
+</figure>
+
+<p>En promenant la souris sur le diagramme, une ligne suit l'angle visé et affiche l'angle du
+vent réel, l'angle et la vitesse du vent apparent, la vitesse du bateau et le VMG. C'est la
+façon rapide de répondre à « à cet angle, dans ce vent, que devrais-je faire ? ».</p>
+
+<h2>8.2 Table VMG</h2>
+
+<p>L'onglet <strong>VMG</strong> donne, pour chaque force de vent, le meilleur angle de près et
+le meilleur angle de portant, avec la vitesse correspondante.</p>
+
+<figure>
+<img src="img/vmg-fr.png" alt="Table VMG">
+<figcaption>Les angles optimaux de près et de portant, calculés pour chaque force de vent.</figcaption>
+</figure>
+
+<p>Ce sont les angles à viser pour gagner au vent ou sous le vent le plus vite possible. En
+pratique : au près, on serre jusqu'à l'angle indiqué ; au portant, on abat jusqu'à lui. Ces deux
+colonnes sont souvent le résultat le plus utile de tout le programme.</p>
+
+<h1>9. Corriger et enregistrer les données</h1>
+
+<p>L'onglet <strong>Données</strong> affiche la polaire sous forme de tableau modifiable : une
+ligne par angle, une colonne par force de vent. Cliquez dans une case pour corriger une valeur.</p>
+
+<ul>
+<li><strong>+ TWA</strong> ajoute un angle, <strong>+ TWS</strong> une force de vent.</li>
+<li>La croix en tête de ligne ou de colonne supprime l'angle ou la force.</li>
+<li><strong>Enregistrer</strong> écrit le fichier <code>.pol</code>.</li>
+</ul>
+
+<p>L'enregistrement est protégé : le fichier est d'abord écrit à côté, relu et vérifié, puis mis
+en place d'un seul coup. Une coupure de courant ou une polaire incohérente ne peut donc pas
+détruire le fichier existant.</p>
+
+<p>Quand faut-il corriger à la main ? Le plus souvent pour combler un trou : une case vide dans
+un angle ou un vent que vous n'avez jamais rencontré, alors que le logiciel de routage, lui, a
+besoin d'une valeur. Recopier la valeur voisine est préférable à un zéro, qui ferait croire au
+routage que le bateau s'arrête.</p>
+
+<h1>10. Imprimer et exporter en PDF</h1>
+
+<p>Le bouton d'impression, en haut à droite, lance l'impression du navigateur. Choisissez
+« Enregistrer au format PDF » comme imprimante pour obtenir un fichier. Seule la vue affichée
+est imprimée — diagramme, tableau ou table VMG — sans les cartes latérales.</p>
+
+<p>Pratique pour afficher la table VMG à la table à carte, ou pour emporter le diagramme
+imprimé en cas de panne électronique.</p>
+
+<h1>11. Aide, langue et thème</h1>
+
+<p>Le bouton <strong>?</strong> ouvre l'aide intégrée, qui reprend l'essentiel de ce manuel en
+quelques écrans.</p>
+
+<figure>
+<img src="img/help-fr.png" alt="Aide intégrée">
+<figcaption>L'aide intégrée, disponible hors connexion internet, en français et en anglais.</figcaption>
+</figure>
+
+<p>Le bouton <strong>FR/EN</strong> change la langue de l'interface et de l'aide. Le bouton
+suivant bascule entre thème clair et thème sombre — le thème sombre préserve la vision nocturne
+à la table à carte. Les deux réglages sont mémorisés par le navigateur.</p>
+
+<h1>12. Formats de fichiers</h1>
+
+<h2>12.1 Fichiers polaires (.pol)</h2>
+
+<p>Tableau à point-virgule, lisible par qtVlm et par la plupart des logiciels de routage. La
+première colonne après l'en-tête est une <strong>colonne sentinelle TWS 0</strong>, toujours
+présente et jamais affichée :</p>
+
+<pre>TWA\TWS;0;6;8;10;12
+45;0.00;4.80;5.90;6.70;7.10
+60;0.00;5.20;6.40;7.30;7.80
+90;0.00;5.60;6.90;7.80;8.40</pre>
+
+<h2>12.2 NMEA 0183</h2>
+
+<table>
+<tr><th>Phrase</th><th>Rôle</th></tr>
+<tr><td><strong>MWV</strong> (référence <code>T</code>)</td><td>vent vrai rapporté à l'eau — <em>prioritaire</em>. Le vent apparent (référence <code>R</code>) est ignoré</td></tr>
+<tr><td><strong>MWD</strong> + <strong>HDT/HDG</strong></td><td>vent vrai rapporté au fond, plus le cap : utilisé seulement à défaut de <code>MWV,T</code></td></tr>
+<tr><td><strong>VHW</strong></td><td>vitesse surface — <em>indispensable</em></td></tr>
+<tr><td><strong>RMC, VTG, VBW, RMA, OSD</strong></td><td>vitesse fond, lue si elle est présente</td></tr>
+</table>
+
+<p>Le vent rapporté à l'eau est préféré parce que la polaire décrit le bateau dans l'eau : le
+vent rapporté au fond est faussé par le courant. Les angles sont repliés de 0–360° sur 0–180° :
+les deux bords alimentent la même polaire.</p>
+
+<h2>12.3 NMEA 2000 (YDRAW)</h2>
+
+<p>Une trame par ligne : horodatage, sens, identifiant CAN, octets.</p>
+<pre>09:30:59.677 R 09FD0205 FF 73 04 B8 BD FC FF FF
+09:30:59.677 R 09F50305 FF A6 03 FF FF 00 FF FF</pre>
+
+<table>
+<tr><th>PGN</th><th>Rôle</th></tr>
+<tr><td><strong>130306</strong> Wind Data</td><td>vent vrai rapporté à l'eau en priorité ; vent fond en repli ; apparent ignoré</td></tr>
+<tr><td><strong>128259</strong> Speed</td><td>vitesse surface — <em>indispensable</em></td></tr>
+<tr><td><strong>129026</strong> COG &amp; SOG</td><td>vitesse fond</td></tr>
+<tr><td><strong>127250</strong> Vessel Heading</td><td>cap vrai, ou magnétique corrigé de la variation</td></tr>
+</table>
+
+<h2>12.4 Bases VDR de qtVlm</h2>
+
+<p>Base SQLite, table <code>VDR</code>, colonnes <code>TWA</code>, <code>TWS</code>,
+<code>STW</code>, et si elles existent <code>SOG</code>, <code>RPM</code> et
+<code>COMMENT</code>. Annoter ses navigations dans qtVlm (nom de voile, état de mer, mot-clé
+moteur) permet à Polar Doctor de répartir automatiquement les mesures entre vos polaires.</p>
+
+<h2>12.5 boat.cfg</h2>
+
+<pre>[boat]
+name = Bon Vent
+
+[mainsail]
+GV
+1R
+2R
+
+[headsails]
+J1
+J3
+Code0
+
+[seastates]
+Calme
+Belle
+Agitée
+
+[engine]
+moteur = Moteur
+charge = Charge
+
+[polars]
+Pres = mains: GV, 1R, 2R ; heads: J1, J3 ; seas: *
+Portant = mains: GV, 1R ; heads: Code0 ; seas: *</pre>
+
+<p>Le fichier est écrit par l'onglet Bateau, mais reste modifiable à la main. L'astérisque
+signifie « tout ». Sans section <code>[seastates]</code>, l'échelle Douglas est utilisée.</p>
+
+<h1>13. Ligne de commande</h1>
+
+<pre>polar_doctor_web [dossier-bateau | fichier.pol] [--port N] [--bind ADRESSE]
+                 [--config FICHIER] [--allow-anonymous]</pre>
+
+<table>
+<tr><th>Option</th><th>Rôle</th></tr>
+<tr><td><em>dossier-bateau</em></td><td>bateau ouvert au démarrage. À défaut : la variable <code>POLAR_DOCTOR_BOAT</code>, sinon le bateau le plus récent</td></tr>
+<tr><td><code>--port N</code></td><td>port d'écoute (défaut 8081)</td></tr>
+<tr><td><code>--bind ADRESSE</code></td><td>adresse d'écoute (défaut <code>127.0.0.1</code> ; <code>0.0.0.0</code> = tout le réseau)</td></tr>
+<tr><td><code>--config FICHIER</code></td><td>fichier de réglages à utiliser</td></tr>
+<tr><td><code>--allow-anonymous</code></td><td>autorise l'écoute réseau sans mot de passe — déconseillé</td></tr>
+</table>
+
+<h1>14. Dépannage</h1>
+
+<table>
+<tr><th>Symptôme</th><th>Cause probable et remède</th></tr>
+<tr><td>Le compteur live reste à 0</td><td>L'état (GV, voile d'avant, mer) ne correspond à aucune polaire, ou pas à celle affichée. La carte Live l'indique. Réglez l'état, ou décochez tous les critères d'une polaire pour qu'elle accepte tout.</td></tr>
+<tr><td>Le live ne démarre pas</td><td>Le message affiché sous la carte Live donne la cause : connexion refusée, port série absent, fichier VDR illisible.</td></tr>
+<tr><td><code>Permission denied</code> sur le port série</td><td>L'utilisateur du serveur n'est pas dans le groupe <code>dialout</code>.</td></tr>
+<tr><td>Le port série est occupé</td><td>Un autre programme tient déjà la passerelle. Lisez son flux réseau plutôt que le port.</td></tr>
+<tr><td>Capture en cours, mais aucun point</td><td>Le flux ne contient peut-être pas de vent <em>vrai</em>, ou pas de vitesse surface. Les deux sont indispensables. Vérifiez que l'instrument publie bien le vent vrai, et que le loch fonctionne.</td></tr>
+<tr><td>Le serveur refuse de démarrer sur le réseau</td><td>Aucun mot de passe n'est défini : renseignez <code>WEB_AUTH</code>.</td></tr>
+<tr><td>Mot de passe oublié</td><td>Changez-le dans le fichier de réglages et redémarrez. Tous les appareils devront se reconnecter.</td></tr>
+<tr><td>Déconnecter tous les appareils</td><td>Supprimez le fichier <code>web_secret</code> et redémarrez le serveur.</td></tr>
+<tr><td>Cases vides dans la polaire</td><td>Moins de trois mesures dans la case, ou conditions jamais rencontrées. Naviguez davantage, ou comblez à la main dans l'onglet Données.</td></tr>
+<tr><td>Polaire bien trop optimiste</td><td>Du moteur a été compté : utilisez le bouton Moteur en direct, annotez vos VDR, ou abaissez le percentile.</td></tr>
+<tr><td>Page inaccessible depuis le réseau</td><td>Le serveur écoute sur <code>127.0.0.1</code> : mettez <code>BIND=0.0.0.0</code>. Vérifiez aussi le pare-feu.</td></tr>
+</table>
+
+<h2>14.1 Constituer une bonne polaire</h2>
+
+<ul>
+<li>Il faut du temps : quelques centaines de milles dans des conditions variées valent mieux
+qu'une journée d'essais.</li>
+<li>Naviguez à tous les angles. Une polaire nourrie uniquement au portant restera vide au près.</li>
+<li>Vérifiez l'étalonnage du loch : toute la polaire en dépend. Comparez vitesse surface et
+vitesse fond par mer calme et sans courant, sur un aller-retour.</li>
+<li>Tenez plusieurs polaires (par voile d'avant, par exemple) plutôt qu'une seule qui mélange un
+spi et un tourmentin.</li>
+<li>Mettez à jour régulièrement : une carène sale, un chargement de croisière ou un jeu de voiles
+neuf, cela se voit dans les chiffres.</li>
+</ul>
+
+</body></html>

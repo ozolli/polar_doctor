@@ -15,6 +15,12 @@ installer sur les appareils clients.
 
 ![Polar Doctor — diagramme polaire dans le navigateur](docs/screenshot.png)
 
+## 📖 Manuel
+
+Manuel complet (installation, utilisation, formats, dépannage), avec captures d'écran :
+**[Français](docs/manuel-fr.pdf)** · **[English](docs/manual-en.pdf)**.
+Sources et procédure de fabrication : [`docs/manual/`](docs/manual/).
+
 ## ⚓ C'est quoi une polaire (et à quoi sert ce programme) ?
 
 La **polaire** d'un voilier est un tableau — et un diagramme — qui donne la vitesse

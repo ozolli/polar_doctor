@@ -1,0 +1,24 @@
+@page { margin: 18mm 16mm 16mm 16mm; }
+body { font-family: "DejaVu Sans", Arial, sans-serif; font-size: 10.5pt; line-height: 1.45; color: #17202a; }
+h1 { font-size: 19pt; color: #0a58ca; border-bottom: 2px solid #0a58ca; padding-bottom: 4px; margin: 0 0 10px; page-break-before: always; }
+h1.first { page-break-before: avoid; }
+h2 { font-size: 13.5pt; color: #17202a; margin: 16px 0 6px; border-left: 4px solid #0a58ca; padding-left: 8px; }
+h3 { font-size: 11.5pt; margin: 12px 0 4px; color: #33475b; }
+p { margin: 5px 0; text-align: justify; }
+ul, ol { margin: 5px 0 5px 18px; padding: 0; }
+li { margin: 2px 0; }
+code, kbd { font-family: "DejaVu Sans Mono", monospace; font-size: 9pt; background: #eef2f7; padding: 0 3px; border-radius: 3px; }
+pre { font-family: "DejaVu Sans Mono", monospace; font-size: 8.6pt; background: #f4f6f9; border: 1px solid #d7dee8;
+      border-left: 3px solid #0a58ca; padding: 7px 9px; white-space: pre-wrap; word-wrap: break-word; page-break-inside: avoid; }
+table { border-collapse: collapse; width: 100%; margin: 8px 0; font-size: 9.4pt; page-break-inside: avoid; }
+th, td { border: 1px solid #c7d0dc; padding: 4px 6px; text-align: left; vertical-align: top; }
+th { background: #e8eef7; }
+figure { margin: 10px 0 14px; page-break-inside: avoid; text-align: center; }
+figure img { max-width: 100%; }
+figcaption { font-size: 8.8pt; color: #5a6b7d; margin-top: 3px; font-style: italic; }
+.note { background: #eef7ee; border-left: 3px solid #2e7d32; padding: 6px 9px; margin: 8px 0; page-break-inside: avoid; }
+.warn { background: #fdf3e7; border-left: 3px solid #b26a00; padding: 6px 9px; margin: 8px 0; page-break-inside: avoid; }
+.cover { text-align: center; margin-top: 70mm; }
+.cover h1 { border: 0; font-size: 34pt; page-break-before: avoid; margin-bottom: 2mm; }
+.cover .sub { font-size: 14pt; color: #33475b; }
+.cover .meta { margin-top: 26mm; font-size: 10pt; color: #5a6b7d; }

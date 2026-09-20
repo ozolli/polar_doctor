@@ -1,0 +1,648 @@
+<!DOCTYPE html>
+<html lang="en"><head><meta charset="utf-8"><title>Polar Doctor — Manual</title>
+<link rel="stylesheet" href="style.css"></head><body>
+
+<h1 class="first">1. Overview</h1>
+
+<p><strong>Polar Doctor</strong> builds, edits and analyses the <strong>performance polars</strong>
+of a sailing boat from your own sailing data: NMEA 0183 log files, VDR databases recorded by
+qtVlm, NMEA 2000 streams, or live capture while you are sailing.</p>
+
+<p>Since version 2.0 it is a <strong>web application</strong>. A small server,
+<code>polar_doctor_web</code>, runs on the onboard computer; the interface opens in any browser,
+at the chart table or on a tablet in the cockpit. Nothing needs to be installed on the client
+devices.</p>
+
+<h2>1.1 What is a polar?</h2>
+
+<p>A boat's polar is a table — and a diagram — giving the <strong>boat speed</strong> for every
+combination of wind <strong>angle</strong> and wind <strong>strength</strong>. It is the
+performance identity card of the boat. Routing software uses it to compute a route; on board, it
+tells you whether you are sailing to the boat's potential, and lets you compare trim settings.</p>
+
+<p>A polar supplied by a builder is theoretical: it describes a new boat, light, sailed by a
+trained crew on flat water. The one Polar Doctor builds describes <em>your</em> boat as it
+actually sails, with its load, its sails and its crew.</p>
+
+<h2>1.2 Vocabulary</h2>
+
+<table>
+<tr><th>Term</th><th>Meaning</th></tr>
+<tr><td><strong>TWA</strong></td><td>True Wind Angle — angle of the true wind to the boat's axis, from 0° (head to wind) to 180° (dead downwind).</td></tr>
+<tr><td><strong>TWS</strong></td><td>True Wind Speed, in knots.</td></tr>
+<tr><td><strong>STW</strong> / <strong>BSP</strong></td><td>Speed Through Water, measured by the log. This is what the polar describes.</td></tr>
+<tr><td><strong>SOG</strong></td><td>Speed Over Ground, from the GPS. Used to sanity-check the STW.</td></tr>
+<tr><td><strong>VMG</strong></td><td>Velocity Made Good — the part of the boat speed gained along the wind axis. Measures upwind and downwind efficiency.</td></tr>
+<tr><td><strong>AWA</strong> / <strong>AWS</strong></td><td>Angle and speed of the <strong>apparent</strong> wind, the one felt on board.</td></tr>
+</table>
+
+<h2>1.3 What the program does, in short</h2>
+
+<ol>
+<li>It reads your data: log files, VDR database, or a live stream.</li>
+<li>It keeps only the useful moments: engine excluded, log glitches rejected, measurements smoothed.</li>
+<li>It sorts every measurement into a cell of 5° of angle by 2 knots of wind.</li>
+<li>For each cell it keeps a <strong>high percentile</strong> of the observed speeds (P90 by
+default): the <em>achievable</em> performance, not the average.</li>
+<li>It writes the result to a <code>.pol</code> file, readable by qtVlm and other routing
+software.</li>
+</ol>
+
+<figure>
+<img src="img/diagram-en.png" alt="Main window">
+<figcaption>The main window: polar diagram, boat selector, wind range, Live card and legend.</figcaption>
+</figure>
+
+<h1>2. Installation</h1>
+
+<p>Polar Doctor runs on <strong>Linux</strong> (x86-64 and ARM64, so also on a Raspberry Pi) and
+on <strong>Windows</strong> (64-bit). The server only needs two libraries, GLib and SQLite; it
+uses no graphical toolkit.</p>
+
+<h2>2.1 Ready-made binaries</h2>
+
+<p>The project's <em>Releases</em> page
+(<code>https://github.com/ozolli/polar_doctor/releases</code>) provides:</p>
+<ul>
+<li><code>polar_doctor-linux-x64.tar.gz</code> — 64-bit Linux;</li>
+<li><code>polar_doctor-linux-arm64.tar.gz</code> — Linux ARM64 (Raspberry Pi);</li>
+<li><code>polar_doctor-windows-x64.zip</code> — 64-bit Windows, executable and libraries,
+nothing to install.</li>
+</ul>
+
+<p>Every archive comes with a <code>.sha256</code> file so you can check it:</p>
+<pre>sha256sum -c polar_doctor-linux-x64.tar.gz.sha256</pre>
+
+<h3>Linux</h3>
+<pre>tar -xzf polar_doctor-linux-x64.tar.gz
+cd polar_doctor-linux-x64
+./polar_doctor_web ~/Boats/MyBoat</pre>
+<p>Then open <code>http://localhost:8081</code> in a browser.</p>
+
+<h3>Windows</h3>
+<ol>
+<li>Unzip <code>polar_doctor-windows-x64.zip</code> into a folder of your choice.</li>
+<li>Double-click <code>polar_doctor_web.exe</code>. A console window opens and prints the
+listening address.</li>
+<li>Open <code>http://localhost:8081</code>.</li>
+</ol>
+<p>To open a boat at startup, pass the folder as an argument, for instance from the command
+prompt:</p>
+<pre>polar_doctor_web.exe C:\Boats\MyBoat</pre>
+
+<h2>2.2 Building from source</h2>
+
+<h3>Linux (Debian, Ubuntu, Raspberry Pi OS)</h3>
+<pre>sudo apt install build-essential pkg-config libglib2.0-dev libsqlite3-dev
+git clone https://github.com/ozolli/polar_doctor.git
+cd polar_doctor
+make
+./polar_doctor_web ~/Boats/MyBoat</pre>
+
+<h3>Windows (MSYS2)</h3>
+<p>Install MSYS2, then in a <em>MINGW64</em> shell:</p>
+<pre>pacman -S --needed make mingw-w64-x86_64-gcc mingw-w64-x86_64-pkgconf \
+          mingw-w64-x86_64-glib2 mingw-w64-x86_64-sqlite3
+make</pre>
+<p>To ship the executable outside MSYS2, copy the libraries it uses next to it:</p>
+<pre>ldd polar_doctor_web.exe | grep -i /mingw64/ | awk '{print $3}' | xargs -I {} cp {} dist/</pre>
+
+<h3>Tests</h3>
+<p><code>make test</code> builds and runs the core unit tests (NMEA 2000 decoding, Actisense
+protocol). They must all print <em>OK</em>.</p>
+
+<h2>2.3 Starting automatically (systemd service, Linux)</h2>
+
+<p>So that Polar Doctor starts with the onboard computer and stays reachable from the network:</p>
+<pre>make                 # as a normal user, never under sudo
+sudo make install    # installs the binary and the service for that user
+sudo systemctl enable --now polar_doctor_web</pre>
+
+<p><code>sudo make install</code>:</p>
+<ul>
+<li>copies the binary into <code>/usr/local/bin/</code>;</li>
+<li>installs <code>/etc/systemd/system/polar_doctor_web.service</code>, set to run under
+<strong>your</strong> account, not root;</li>
+<li>creates <code>/etc/default/polar_doctor_web</code> (mode 600) if it does not exist;</li>
+<li>never overwrites an existing <code>/etc/default/polar_doctor_web</code>: your settings and
+your password survive upgrades.</li>
+</ul>
+
+<p>The service listens on all interfaces, port 8081, and reopens the most recently used boat.
+Useful commands:</p>
+<pre>sudo systemctl status polar_doctor_web     # state
+sudo systemctl restart polar_doctor_web    # after an upgrade
+journalctl -u polar_doctor_web -f          # live log</pre>
+
+<div class="note"><strong>Upgrading.</strong> After a <code>git pull</code>:
+<code>make &amp;&amp; sudo make install &amp;&amp; sudo systemctl restart polar_doctor_web</code>.
+Your polars, configuration and password are left untouched.</div>
+
+<h1>3. Access, password and settings files</h1>
+
+<p>The interface <strong>writes</strong> files on the server (polars, boat configuration),
+creates folders and reads paths you give it. Exposing it to the network unprotected would hand
+those rights to the whole network.</p>
+
+<ul>
+<li>Locally (address <code>127.0.0.1</code>, the default), no password is asked.</li>
+<li>To listen on the network a password is <strong>mandatory</strong>: without one the server
+refuses to start, unless explicitly given <code>--allow-anonymous</code>.</li>
+</ul>
+
+<h2>3.1 Where to put the password</h2>
+
+<p>It is always written as <code>WEB_AUTH=user:password</code>, and never given on the command
+line (which other users of the machine can read).</p>
+
+<h3>Linux, as a service</h3>
+<pre>sudo nano /etc/default/polar_doctor_web     # WEB_AUTH=me:MyPassword
+sudo systemctl restart polar_doctor_web</pre>
+
+<h3>Linux, started by hand</h3>
+<pre>read -rsp 'Password: ' P; echo
+WEB_AUTH="me:$P" ./polar_doctor_web ~/Boats/MyBoat --bind 0.0.0.0</pre>
+
+<h3>Windows</h3>
+<p>On its first run the server creates a fully commented settings file and prints its path. Open
+it (Windows key + R):</p>
+<pre>notepad %LOCALAPPDATA%\polar_doctor\web.conf</pre>
+<p>then remove the <code>#</code> in front of the lines you need:</p>
+<pre>WEB_AUTH=me:MyPassword
+BIND=0.0.0.0</pre>
+<p>Restart <code>polar_doctor_web.exe</code>. On the first network access, Windows Firewall asks
+you to allow the program.</p>
+
+<h2>3.2 The <code>web.conf</code> file</h2>
+
+<p>Same keys on both systems. The file lives in
+<code>%LOCALAPPDATA%\polar_doctor\web.conf</code> on Windows and
+<code>~/.config/polar_doctor/web.conf</code> on Linux; <code>--config FILE</code> selects
+another one.</p>
+
+<table>
+<tr><th>Key</th><th>Role</th><th>Default</th></tr>
+<tr><td><code>WEB_AUTH</code></td><td><code>user:password</code>, mandatory outside <code>127.0.0.1</code></td><td>—</td></tr>
+<tr><td><code>BIND</code></td><td>listening address; <code>0.0.0.0</code> = the whole network</td><td><code>127.0.0.1</code></td></tr>
+<tr><td><code>PORT</code></td><td>listening port</td><td><code>8081</code></td></tr>
+<tr><td><code>POLAR_DOCTOR_BOAT</code></td><td>boat opened at startup</td><td>most recent</td></tr>
+</table>
+
+<p>Precedence, strongest first: <strong>command line</strong>, then <strong>environment
+variables</strong>, then <strong>web.conf</strong>. On Linux a <code>web.conf</code> holding a
+password must be readable by its owner only (<code>chmod 600</code>), otherwise the server
+refuses to start.</p>
+
+<h2>3.3 Signing in</h2>
+
+<p>When a password is configured, the browser shows a sign-in page.</p>
+
+<figure>
+<img src="img/login-en.png" alt="Sign-in page" style="max-width:52%">
+<figcaption>The sign-in page. A cookie keeps the session open for a year on that device.</figcaption>
+</figure>
+
+<p>After signing in, a cookie is stored on the device (valid one year, not readable by scripts,
+not sent to other sites), so the password is not asked again on every visit. Changing the
+password signs every device out. The sign-out button is at the top right of the interface.</p>
+
+<div class="note">For scripts, plain HTTP authentication still works:
+<code>curl -u me:MyPassword http://boat:8081/api/polar</code>.</div>
+
+<h2>3.4 All of Polar Doctor's files</h2>
+
+<table>
+<tr><th>File</th><th>Location</th><th>Role</th></tr>
+<tr><td><code>web.conf</code></td><td>Linux: <code>~/.config/polar_doctor/</code><br>Windows: <code>%LOCALAPPDATA%\polar_doctor\</code></td><td>server settings</td></tr>
+<tr><td><code>polar_doctor_web</code></td><td><code>/etc/default/</code> (Linux)</td><td>systemd service settings, mode 600</td></tr>
+<tr><td><code>web_secret</code></td><td>next to <code>web.conf</code></td><td>key for the sign-in cookies. Deleting it signs every device out</td></tr>
+<tr><td><code>recent_boats</code></td><td>next to <code>web.conf</code></td><td>the last eight boats opened</td></tr>
+<tr><td><code>boat.cfg</code></td><td>boat folder</td><td>inventory and polar definitions</td></tr>
+<tr><td><code>*.pol</code></td><td>boat folder</td><td>the polars themselves</td></tr>
+</table>
+
+<h1>4. Getting started</h1>
+
+<p>For Polar Doctor a <strong>boat</strong> is simply a <strong>folder</strong> holding a
+<code>boat.cfg</code> configuration file and one or more <code>.pol</code> polars. Nothing else
+is needed, and the folder can be copied or backed up like any other.</p>
+
+<h2>4.1 Creating a boat</h2>
+
+<p>In the <strong>Boat</strong> card, top right:</p>
+<ol>
+<li>type the path of the folder to create — for instance
+<code>/home/sailor/Boats/Fair Wind</code> or <code>C:\Boats\Fair Wind</code>;</li>
+<li>type the boat's name in the <em>Name</em> field;</li>
+<li>click <strong>New</strong>.</li>
+</ol>
+<p>The folder is created, with a default <code>boat.cfg</code> and an empty polar, and the boat
+is opened straight away.</p>
+
+<h2>4.2 Opening an existing boat</h2>
+
+<p>Type its folder and click <strong>Open</strong>, or pick it from the <strong>Recent</strong>
+list, which keeps the last eight. The boat you open is also the one the server will reopen next
+time it starts — handy for a service that restarts with the boat.</p>
+
+<p>A single <code>.pol</code> file can also be opened without a boat folder:
+<code>./polar_doctor_web polar.pol</code>. Boat-related features (inventory, multiple polars,
+live routing) are then unavailable.</p>
+
+<h2>4.3 The screen at a glance</h2>
+
+<ul>
+<li>Top: the name of the open file, the four tabs (<strong>Diagram</strong>,
+<strong>Data</strong>, <strong>VMG</strong>, <strong>Boat</strong>), and on the right the
+<strong>?</strong> (help), print, <strong>FR/EN</strong> and light/dark buttons.</li>
+<li>Left: the main view, depending on the selected tab.</li>
+<li>Right: the <strong>Boat</strong>, <strong>TWS range</strong>, <strong>Dynamic mode</strong>,
+<strong>Live</strong> and <strong>Legend</strong> cards.</li>
+</ul>
+
+<p>Language and theme are remembered by each browser separately: the cockpit tablet can be in
+dark theme while the chart-table PC stays light.</p>
+
+<h1>5. Describing the boat</h1>
+
+<p>The <strong>Boat</strong> tab describes the sail inventory and the polars you want to keep.
+This is what lets the program file every measurement into the right polar during a live
+capture.</p>
+
+<figure>
+<img src="img/boat-en.png" alt="Boat tab">
+<figcaption>The Boat tab: name, inventory (mainsail, headsails, sea states), engine keywords and polars.</figcaption>
+</figure>
+
+<h2>5.1 Inventory</h2>
+
+<ul>
+<li><strong>Main</strong>: mainsail states, one per line — for instance <code>Full</code>,
+<code>R1</code>, <code>R2</code>, <code>R3</code>.</li>
+<li><strong>Headsail</strong>: the headsails — <code>J1</code>, <code>J3</code>,
+<code>Code0</code>, <code>Spi</code>…</li>
+<li><strong>Sea</strong>: sea states. The Douglas scale is used by default.</li>
+<li><strong>Engine</strong>: the two keywords looked for in the comments of a VDR database. One
+means the propeller is engaged (those points are dropped), the other means the engine is running
+in neutral to charge the batteries (those points are kept, because the boat is still sailing).</li>
+</ul>
+
+<h2>5.2 Polars and criteria</h2>
+
+<p>Each polar has a name — which is also its file name, <code>Upwind.pol</code>,
+<code>Downwind.pol</code> — and <strong>criteria</strong> as checkboxes: which mainsails, which
+headsails and which sea states it covers.</p>
+
+<div class="note"><strong>Checking nothing means "everything".</strong> A polar with no criterion
+ticked accepts every condition. That is the right setting if you keep a single polar for the
+boat.</div>
+
+<p>A criterion written in <code>boat.cfg</code> but missing from the inventory is shown in
+orange: either add it to the inventory, or untick it to remove it.</p>
+
+<p><strong>Save</strong> rewrites <code>boat.cfg</code>. The file is read back and checked first:
+if it is inconsistent, the old one is kept. Comments you may have added by hand to
+<code>boat.cfg</code> are lost when saving from the interface.</p>
+
+<h1>6. Building a polar from files</h1>
+
+<p><strong>Data</strong> tab, <strong>Import files</strong> box. List the files to read,
+<strong>one path per line</strong>. These are paths <em>on the server</em>, not on the device
+showing the interface: nothing is uploaded.</p>
+
+<figure>
+<img src="img/data-en.png" alt="Data tab">
+<figcaption>The Data tab: file import, percentile selector, and the editable polar table.</figcaption>
+</figure>
+
+<h2>6.1 Accepted formats</h2>
+
+<ul>
+<li><strong>NMEA 0183</strong> (<code>.nmea</code>, <code>.log</code>, <code>.txt</code>):
+<code>MWV</code> or <code>MWD</code> wind, <code>VHW</code> speed through water,
+<code>HDT</code>/<code>HDG</code> heading, and speed over ground when present.</li>
+<li><strong>NMEA 2000</strong> as YDRAW text, as recorded by Yacht Devices gateways or published
+by n2k-mux.</li>
+<li><strong>qtVlm VDR</strong> (<code>.db</code>): SQLite databases recorded while sailing, with
+wind, speed, and possibly engine revolutions and comments.</li>
+</ul>
+
+<h2>6.2 Create or update</h2>
+
+<ul>
+<li><strong>Create</strong> builds a brand-new polar from the listed files only. It is saved
+under a timestamped name in the boat folder.</li>
+<li><strong>Update</strong> starts from the currently selected polar, adds the new measurements
+and recomputes everything. The polar can therefore go <strong>up or down</strong>: this is what
+gradually brings a theoretical polar back to the reality of the boat.</li>
+</ul>
+
+<h2>6.3 The percentile</h2>
+
+<p>Each cell of the table (5° of angle × 2 knots of wind) collects many measurements. To keep a
+single figure, Polar Doctor takes a <strong>high percentile</strong>, adjustable from P85 to
+P95, P90 by default.</p>
+
+<ul>
+<li>The <em>average</em> would be dragged down by manoeuvres, mishandled gusts or a hesitant
+autopilot.</li>
+<li>The <em>maximum</em> would keep a surfing gust or a measurement error.</li>
+<li>P90 means "the speed the boat exceeds one time in ten in these conditions" — the achievable
+performance when everything is properly trimmed.</li>
+</ul>
+
+<p>Lowering to P85 gives a cautious polar, useful for shorthanded offshore routing. Raising to
+P95 gives a racing polar, demanding to sail to. A cell holding fewer than <strong>three</strong>
+measurements is left empty: a single point is not a performance.</p>
+
+<h2>6.4 What is discarded automatically</h2>
+
+<ul>
+<li><strong>Engine</strong>: in a VDR database, any point recorded with non-zero engine
+revolutions is excluded, unless the comment says the batteries are being charged.</li>
+<li><strong>Log glitches</strong>: the gap between speed through water and speed over ground is
+tracked continuously; a gap that changes abruptly (blocked paddle wheel, planing, air bubble)
+gets the measurement rejected. A current, which varies slowly, is kept.</li>
+<li><strong>Noise</strong>: speed through water from NMEA files is smoothed by a moving average,
+reset at each manoeuvre so as not to smooth across a tack.</li>
+<li><strong>Impossible values</strong>: angle outside 0–180°, wind above 70 knots, speed above
+50 knots, NMEA sentences with a bad checksum.</li>
+</ul>
+
+<h1>7. Live capture</h1>
+
+<p>The <strong>Live</strong> card builds the polar while you sail. Choose a source, an address,
+then click <strong>Start</strong>.</p>
+
+<figure>
+<img src="img/live-en.png" alt="Live capture">
+<figcaption>Capture running: scatter of points, current point in red, the polar being built, and the counter at the bottom of the Live card.</figcaption>
+</figure>
+
+<h2>7.1 Sources</h2>
+
+<table>
+<tr><th>Source</th><th>Address to type</th><th>Use</th></tr>
+<tr><td><strong>UDP (0183 / N2K)</strong></td><td>a port number, e.g. <code>10110</code></td><td>listens to frames broadcast on the boat network</td></tr>
+<tr><td><strong>TCP (0183 / N2K)</strong></td><td><code>host:port</code>, e.g. <code>nav.local:2700</code></td><td>connects to a multiplexer or a gateway</td></tr>
+<tr><td><strong>qtVlm VDR</strong></td><td>path to <code>vdr.db</code></td><td>follows the file qtVlm is writing</td></tr>
+<tr><td><strong>Actisense NGX-1 (serial)</strong></td><td><code>/dev/ttyUSB0</code>, <code>COM3</code>, optionally followed by <code>@230400</code></td><td>reads a USB NMEA 2000 gateway directly</td></tr>
+</table>
+
+<p>Over UDP and TCP the format is detected line by line: NMEA 0183 and NMEA 2000 (YDRAW) may
+even be mixed in the same stream.</p>
+
+<h3>About NMEA 2000</h3>
+<p>Polar Doctor does not attach to the CAN bus itself. It needs either:</p>
+<ul>
+<li>a gateway publishing N2K on the network as YDRAW — n2k-mux (port 2700), a Yacht Devices
+Wi-Fi gateway…;</li>
+<li>an Actisense NGX-1 or NGT-1 serial gateway, connected by USB and set to
+<strong>Transfer</strong> mode (raw data), which Polar Doctor reads directly;</li>
+<li>or a gateway converting N2K to NMEA 0183 broadcast on the network.</li>
+</ul>
+
+<div class="warn"><strong>A serial port can only be opened once.</strong> If another program
+(n2k-mux, qtVlm) already holds the USB gateway, Polar Doctor cannot open it: read the network
+stream that program publishes instead.</div>
+
+<h3>Serial port permissions on Linux</h3>
+<pre>sudo usermod -aG dialout $USER     # then log in again, or restart the service</pre>
+<p>Prefer a stable port name such as
+<code>/dev/serial/by-id/usb-Actisense_NGX-1-...</code>: unlike <code>/dev/ttyUSB0</code>, it does
+not change between plug-ins.</p>
+
+<h2>7.2 Boat state</h2>
+
+<p>Below the Live buttons, three lists give the <strong>mainsail</strong>, the
+<strong>headsail</strong> and the <strong>sea state</strong>. Every measurement is filed into
+<strong>all</strong> the polars whose criteria match that state. Change those lists at each
+manoeuvre: the capture carries on and the following points go to the right polar.</p>
+
+<div class="warn"><strong>If the counter stays at 0</strong>, the chosen state usually matches no
+polar — or only polars other than the one displayed. The Live card then says so explicitly.
+Remember that the counter and the scatter only show the <strong>displayed</strong> polar.</div>
+
+<h2>7.3 The Engine button</h2>
+
+<p>When you engage the propeller, click <strong>Engine</strong>: capture carries on but points
+are no longer recorded. Click again when you stop. Without this, a few hours of motoring are
+enough to inflate the light-wind part of the polar.</p>
+
+<h2>7.4 Stopping and saving</h2>
+
+<p><strong>Stop</strong> aggregates the measurements and writes the files:</p>
+<ul>
+<li>with a boat and its polars: every polar that received points is updated in place, starting
+from its existing content;</li>
+<li>without a boat: a timestamped <code>live_YYYYMMDD_HHMMSS.pol</code> file is created.</li>
+</ul>
+<p>The names of the files written appear under the Live card.</p>
+
+<h1>8. Reading the diagram</h1>
+
+<p>The <strong>Diagram</strong> tab draws the polar as a half rose: the bow points up (0°), dead
+downwind is at the bottom (180°), and the concentric circles give boat speed in knots.</p>
+
+<ul>
+<li>One <strong>curve per wind strength</strong>, with its colour, repeated in the legend.</li>
+<li>Curves are smoothed; the computed points are the angles present in the table.</li>
+<li>Stretches drawn in <strong>red</strong> mark the zones where VMG degrades: pinching further
+upwind, or bearing away further downwind, loses ground even if boat speed rises.</li>
+<li>The <strong>TWS range</strong> card restricts the display to a band of wind strengths, so the
+diagram is not buried under twenty curves.</li>
+</ul>
+
+<h2>8.1 Dynamic mode</h2>
+
+<p>Tick <strong>Enable</strong> in the <em>Dynamic mode</em> card and enter a wind strength, even
+one absent from the table: the matching curve is interpolated.</p>
+
+<figure>
+<img src="img/dyn-en.png" alt="Dynamic mode">
+<figcaption>Dynamic mode: a single curve, interpolated for the requested wind strength.</figcaption>
+</figure>
+
+<p>Moving the mouse across the diagram, a line follows the aimed angle and shows the true wind
+angle, the apparent wind angle and speed, the boat speed and the VMG. This is the quick way to
+answer "at this angle, in this wind, what should I be doing?".</p>
+
+<h2>8.2 VMG table</h2>
+
+<p>The <strong>VMG</strong> tab gives, for each wind strength, the best upwind angle and the best
+downwind angle, with the matching boat speed.</p>
+
+<figure>
+<img src="img/vmg-en.png" alt="VMG table">
+<figcaption>Optimal upwind and downwind angles, computed for each wind strength.</figcaption>
+</figure>
+
+<p>These are the angles to aim for to gain to windward or to leeward as fast as possible. In
+practice: upwind, point up to the angle shown; downwind, bear away down to it. Those two columns
+are often the most useful output of the whole program.</p>
+
+<h1>9. Editing and saving the data</h1>
+
+<p>The <strong>Data</strong> tab shows the polar as an editable table: one row per angle, one
+column per wind strength. Click a cell to correct a value.</p>
+
+<ul>
+<li><strong>+ TWA</strong> adds an angle, <strong>+ TWS</strong> a wind strength.</li>
+<li>The cross at the head of a row or column deletes that angle or strength.</li>
+<li><strong>Save</strong> writes the <code>.pol</code> file.</li>
+</ul>
+
+<p>Saving is protected: the file is written alongside first, read back and checked, then moved
+into place in one step. A power cut or an inconsistent polar cannot destroy the existing file.</p>
+
+<p>When should you edit by hand? Usually to fill a hole: an empty cell for an angle or a wind
+strength you have never met, when the routing software needs a value anyway. Copying the
+neighbouring value is better than a zero, which would tell the router that the boat stops.</p>
+
+<h1>10. Printing and exporting to PDF</h1>
+
+<p>The print button at the top right starts the browser's print dialogue. Choose "Save as PDF" as
+the printer to get a file. Only the displayed view is printed — diagram, table or VMG table —
+without the side cards.</p>
+
+<p>Handy to pin the VMG table at the chart table, or to carry a printed diagram in case of an
+electronics failure.</p>
+
+<h1>11. Help, language and theme</h1>
+
+<p>The <strong>?</strong> button opens the built-in help, which covers the essentials of this
+manual in a few screens.</p>
+
+<figure>
+<img src="img/help-en.png" alt="Built-in help">
+<figcaption>The built-in help, available without an internet connection, in French and English.</figcaption>
+</figure>
+
+<p>The <strong>FR/EN</strong> button switches the language of the interface and of the help. The
+next button toggles light and dark themes — the dark theme preserves night vision at the chart
+table. Both settings are remembered by the browser.</p>
+
+<h1>12. File formats</h1>
+
+<h2>12.1 Polar files (.pol)</h2>
+
+<p>A semicolon-separated table, readable by qtVlm and most routing software. The first column
+after the header is a <strong>TWS 0 sentinel column</strong>, always present and never
+displayed:</p>
+
+<pre>TWA\TWS;0;6;8;10;12
+45;0.00;4.80;5.90;6.70;7.10
+60;0.00;5.20;6.40;7.30;7.80
+90;0.00;5.60;6.90;7.80;8.40</pre>
+
+<h2>12.2 NMEA 0183</h2>
+
+<table>
+<tr><th>Sentence</th><th>Role</th></tr>
+<tr><td><strong>MWV</strong> (reference <code>T</code>)</td><td>true wind referenced to the water — <em>preferred</em>. Apparent wind (reference <code>R</code>) is ignored</td></tr>
+<tr><td><strong>MWD</strong> + <strong>HDT/HDG</strong></td><td>ground-referenced true wind plus heading: used only when <code>MWV,T</code> is absent</td></tr>
+<tr><td><strong>VHW</strong></td><td>speed through water — <em>required</em></td></tr>
+<tr><td><strong>RMC, VTG, VBW, RMA, OSD</strong></td><td>speed over ground, read when present</td></tr>
+</table>
+
+<p>Water-referenced wind is preferred because the polar describes the boat in the water:
+ground-referenced wind is skewed by the current. Angles are folded from 0–360° to 0–180°, so both
+tacks feed the same polar.</p>
+
+<h2>12.3 NMEA 2000 (YDRAW)</h2>
+
+<p>One CAN frame per line: timestamp, direction, CAN identifier, bytes.</p>
+<pre>09:30:59.677 R 09FD0205 FF 73 04 B8 BD FC FF FF
+09:30:59.677 R 09F50305 FF A6 03 FF FF 00 FF FF</pre>
+
+<table>
+<tr><th>PGN</th><th>Role</th></tr>
+<tr><td><strong>130306</strong> Wind Data</td><td>water-referenced true wind first; ground-referenced as a fallback; apparent ignored</td></tr>
+<tr><td><strong>128259</strong> Speed</td><td>speed through water — <em>required</em></td></tr>
+<tr><td><strong>129026</strong> COG &amp; SOG</td><td>speed over ground</td></tr>
+<tr><td><strong>127250</strong> Vessel Heading</td><td>true heading, or magnetic corrected by the variation</td></tr>
+</table>
+
+<h2>12.4 qtVlm VDR databases</h2>
+
+<p>An SQLite database, table <code>VDR</code>, columns <code>TWA</code>, <code>TWS</code>,
+<code>STW</code>, and where present <code>SOG</code>, <code>RPM</code> and <code>COMMENT</code>.
+Annotating your passages in qtVlm (sail name, sea state, engine keyword) lets Polar Doctor split
+the measurements between your polars automatically.</p>
+
+<h2>12.5 boat.cfg</h2>
+
+<pre>[boat]
+name = Fair Wind
+
+[mainsail]
+Full
+R1
+R2
+
+[headsails]
+J1
+J3
+Code0
+
+[seastates]
+Calm
+Smooth
+Moderate
+
+[engine]
+moteur = Engine
+charge = Charging
+
+[polars]
+Upwind = mains: Full, R1, R2 ; heads: J1, J3 ; seas: *
+Downwind = mains: Full, R1 ; heads: Code0 ; seas: *</pre>
+
+<p>The file is written by the Boat tab but stays editable by hand. An asterisk means
+"everything". Without a <code>[seastates]</code> section, the Douglas scale is used.</p>
+
+<h1>13. Command line</h1>
+
+<pre>polar_doctor_web [boat-folder | file.pol] [--port N] [--bind ADDRESS]
+                 [--config FILE] [--allow-anonymous]</pre>
+
+<table>
+<tr><th>Option</th><th>Role</th></tr>
+<tr><td><em>boat-folder</em></td><td>boat opened at startup. Otherwise the <code>POLAR_DOCTOR_BOAT</code> variable, otherwise the most recent boat</td></tr>
+<tr><td><code>--port N</code></td><td>listening port (default 8081)</td></tr>
+<tr><td><code>--bind ADDRESS</code></td><td>listening address (default <code>127.0.0.1</code>; <code>0.0.0.0</code> = whole network)</td></tr>
+<tr><td><code>--config FILE</code></td><td>settings file to use</td></tr>
+<tr><td><code>--allow-anonymous</code></td><td>allows network listening without a password — not recommended</td></tr>
+</table>
+
+<h1>14. Troubleshooting</h1>
+
+<table>
+<tr><th>Symptom</th><th>Likely cause and cure</th></tr>
+<tr><td>The live counter stays at 0</td><td>The state (main, headsail, sea) matches no polar, or not the displayed one. The Live card says so. Set the state, or untick every criterion of a polar so that it accepts everything.</td></tr>
+<tr><td>Live capture will not start</td><td>The message under the Live card gives the cause: connection refused, missing serial port, unreadable VDR file.</td></tr>
+<tr><td><code>Permission denied</code> on the serial port</td><td>The server's user is not in the <code>dialout</code> group.</td></tr>
+<tr><td>The serial port is busy</td><td>Another program already holds the gateway. Read its network stream instead of the port.</td></tr>
+<tr><td>Capture running, but no points</td><td>The stream may carry no <em>true</em> wind, or no speed through water. Both are required. Check that the instrument publishes true wind and that the log works.</td></tr>
+<tr><td>The server refuses to start on the network</td><td>No password is set: fill in <code>WEB_AUTH</code>.</td></tr>
+<tr><td>Forgotten password</td><td>Change it in the settings file and restart. Every device will have to sign in again.</td></tr>
+<tr><td>Sign every device out</td><td>Delete the <code>web_secret</code> file and restart the server.</td></tr>
+<tr><td>Empty cells in the polar</td><td>Fewer than three measurements in the cell, or conditions never met. Sail more, or fill them in by hand in the Data tab.</td></tr>
+<tr><td>The polar is far too optimistic</td><td>Motoring was counted: use the Engine button live, annotate your VDR files, or lower the percentile.</td></tr>
+<tr><td>The page is unreachable from the network</td><td>The server listens on <code>127.0.0.1</code>: set <code>BIND=0.0.0.0</code>. Check the firewall too.</td></tr>
+</table>
+
+<h2>14.1 Building a good polar</h2>
+
+<ul>
+<li>It takes time: a few hundred miles in varied conditions are worth more than a day of trials.</li>
+<li>Sail at every angle. A polar fed only downwind will stay empty upwind.</li>
+<li>Check the log calibration: the whole polar depends on it. Compare speed through water and
+speed over ground in calm water without current, on a there-and-back run.</li>
+<li>Keep several polars (per headsail, for instance) rather than a single one mixing a spinnaker
+and a storm jib.</li>
+<li>Update regularly: a dirty hull, a cruising load or a new set of sails all show up in the
+figures.</li>
+</ul>
+
+</body></html>

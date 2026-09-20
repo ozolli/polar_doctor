@@ -4,6 +4,11 @@ Toutes les modifications notables du projet seront documentées dans ce fichier.
 
 ## [Non publié]
 
+### Ajouté
+- 📖 **Manuel PDF** en français et en anglais (`docs/manuel-fr.pdf`, `docs/manual-en.pdf`) :
+  installation, réglages, prise en main, capture live, formats et dépannage, avec captures
+  d'écran. Sources et harnais de capture dans `docs/manual/`.
+
 ### Corrigé
 - 🐛 **Capture live depuis l'interface** : l'adresse était transmise encodée (`:` → `%3A`,
   `/` → `%2F`) et n'était pas décodée par le serveur. Seules les sources UDP (port seul)
