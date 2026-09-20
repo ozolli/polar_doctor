@@ -334,11 +334,18 @@ sur l'appareil qui affiche l'interface : il n'y a pas d'envoi de fichier.</p>
 <li><strong>NMEA 0183</strong> (<code>.nmea</code>, <code>.log</code>, <code>.txt</code>) :
 vent <code>MWV</code> ou <code>MWD</code>, vitesse surface <code>VHW</code>, cap
 <code>HDT</code>/<code>HDG</code>, et vitesse fond si elle est présente.</li>
-<li><strong>NMEA 2000</strong> au format texte YDRAW, tel que l'enregistrent les passerelles
-Yacht Devices ou que le publie n2k-mux.</li>
+<li><strong>NMEA 2000</strong> au format texte <strong>YDRAW</strong>, tel que l'enregistrent
+les passerelles Yacht Devices ou que le publie n2k-mux (port 2700). Une trame par ligne.</li>
 <li><strong>VDR de qtVlm</strong> (<code>.db</code>) : bases SQLite enregistrées pendant la
 navigation, avec le vent, la vitesse, et éventuellement le régime moteur et des commentaires.</li>
 </ul>
+
+<div class="note"><strong>Et les passerelles Actisense ?</strong> Une <strong>NGX-1</strong> ou
+<strong>NGT-1</strong> se lit <strong>en direct</strong>, par le port série (voir le chapitre 7).
+En revanche, ses journaux <em>binaires</em> (fichiers <code>.ebl</code> d'Actisense, ou capture
+brute du port série) ne s'importent pas ici : l'import de fichiers attend du texte. Pour
+enregistrer une navigation en vue d'un import ultérieur, écrivez du NMEA 0183, du YDRAW, ou
+laissez qtVlm tenir son VDR.</div>
 
 <h2>6.2 Créer ou mettre à jour</h2>
 

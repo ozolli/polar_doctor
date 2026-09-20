@@ -2,6 +2,12 @@
 
 Toutes les modifications notables du projet seront documentées dans ce fichier.
 
+## [Non publié]
+
+### Corrigé
+- 📖 Manuels : le paragraphe sur les formats importables ne disait pas ce qu'il advient d'une
+  passerelle Actisense (lue en direct, journaux binaires non importables).
+
 ## [2.1.3] - 2026-09-20
 
 ### Ajouté

@@ -321,11 +321,17 @@ showing the interface: nothing is uploaded.</p>
 <li><strong>NMEA 0183</strong> (<code>.nmea</code>, <code>.log</code>, <code>.txt</code>):
 <code>MWV</code> or <code>MWD</code> wind, <code>VHW</code> speed through water,
 <code>HDT</code>/<code>HDG</code> heading, and speed over ground when present.</li>
-<li><strong>NMEA 2000</strong> as YDRAW text, as recorded by Yacht Devices gateways or published
-by n2k-mux.</li>
+<li><strong>NMEA 2000</strong> as <strong>YDRAW</strong> text, as recorded by Yacht Devices
+gateways or published by n2k-mux (port 2700). One frame per line.</li>
 <li><strong>qtVlm VDR</strong> (<code>.db</code>): SQLite databases recorded while sailing, with
 wind, speed, and possibly engine revolutions and comments.</li>
 </ul>
+
+<div class="note"><strong>What about Actisense gateways?</strong> An <strong>NGX-1</strong> or
+<strong>NGT-1</strong> is read <strong>live</strong>, over the serial port (see chapter 7). Its
+<em>binary</em> logs, however — Actisense <code>.ebl</code> files, or a raw capture of the serial
+port — cannot be imported here: file import expects text. To record a passage for later import,
+write NMEA 0183 or YDRAW, or let qtVlm keep its VDR.</div>
 
 <h2>6.2 Create or update</h2>
 
