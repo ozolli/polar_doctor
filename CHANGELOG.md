@@ -2,12 +2,13 @@
 
 Toutes les modifications notables du projet seront documentées dans ce fichier.
 
-## [Non publié]
+## [2.1.3] - 2026-09-20
 
 ### Ajouté
 - 📖 **Manuel PDF** en français et en anglais (`docs/manuel-fr.pdf`, `docs/manual-en.pdf`) :
   installation, réglages, prise en main, capture live, formats et dépannage, avec captures
   d'écran. Sources et harnais de capture dans `docs/manual/`.
+- 📖 Les manuels sont joints aux releases et inclus dans chaque archive.
 
 ### Corrigé
 - 🐛 **Capture live depuis l'interface** : l'adresse était transmise encodée (`:` → `%3A`,

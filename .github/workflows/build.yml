@@ -51,6 +51,7 @@ jobs:
         mkdir -p dist/polar_doctor-linux-x64
         cp polar_doctor_web web/polar_doctor_web.service web/polar_doctor_web.default \
            README.md LICENSE dist/polar_doctor-linux-x64/
+        cp docs/manuel-fr.pdf docs/manual-en.pdf dist/polar_doctor-linux-x64/
         tar -C dist -czf dist/polar_doctor-linux-x64.tar.gz polar_doctor-linux-x64
 
     - name: Upload artifact
@@ -103,6 +104,7 @@ jobs:
         mkdir -p dist/polar_doctor-linux-arm64
         cp polar_doctor_web web/polar_doctor_web.service web/polar_doctor_web.default \
            README.md LICENSE dist/polar_doctor-linux-arm64/
+        cp docs/manuel-fr.pdf docs/manual-en.pdf dist/polar_doctor-linux-arm64/
         tar -C dist -czf dist/polar_doctor-linux-arm64.tar.gz polar_doctor-linux-arm64
 
     - name: Upload artifact
@@ -170,6 +172,7 @@ jobs:
       run: |
         mkdir -p dist/polar_doctor_win
         cp polar_doctor_web.exe README.md LICENSE dist/polar_doctor_win/
+        cp docs/manuel-fr.pdf docs/manual-en.pdf dist/polar_doctor_win/
         # DLL MinGW réellement liées (glib, sqlite, runtime)
         ldd polar_doctor_web.exe | grep -i '/mingw64/' | awk '{print $3}' | sort -u \
           | xargs -I {} cp {} dist/polar_doctor_win/
@@ -240,6 +243,8 @@ jobs:
           artifacts/polar_doctor-linux-arm64.tar.gz.sha256
           artifacts/polar_doctor-windows-x64.zip
           artifacts/polar_doctor-windows-x64.zip.sha256
+          docs/manuel-fr.pdf
+          docs/manual-en.pdf
           artifacts/SHA256SUMS.txt
         body: |
           # Polar Doctor ${{ github.ref_name }}
@@ -273,6 +278,10 @@ jobs:
           Pour un accès depuis le réseau, ouvrir le fichier de réglages créé au premier
           lancement (Windows + R) : `notepad %LOCALAPPDATA%\polar_doctor\web.conf`, et
           décommenter `WEB_AUTH=utilisateur:motdepasse` et `BIND=0.0.0.0`, puis relancer.
+
+          ## 📖 Manuel
+          `manuel-fr.pdf` et `manual-en.pdf` (joints ci-dessous, et inclus dans chaque
+          archive) : installation, réglages, capture live, formats, dépannage.
 
           ## 🔐 Vérification des fichiers
           ```bash
