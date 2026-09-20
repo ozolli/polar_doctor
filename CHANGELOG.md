@@ -2,7 +2,7 @@
 
 Toutes les modifications notables du projet seront documentées dans ce fichier.
 
-## [Non publié]
+## [2.1.2] - 2026-09-20
 
 ### Ajouté
 - ✅ Capture live : la carte Live signale quand l'état (GV / voile d'avant / mer) ne correspond
