@@ -1760,7 +1760,7 @@ static void handle_client(int fd)
         if (ps) { if (strncmp(ps + 4, "tcp", 3) == 0) src = 1; else if (strncmp(ps + 4, "vdr", 3) == 0) src = 3;
                   else if (strncmp(ps + 4, "ngx", 3) == 0) src = 4; }
         char addr[128] = "10110";
-        if (pa) { pa += 5; size_t i = 0; while (pa[i] && pa[i] != '&' && i < sizeof addr - 1) { addr[i] = pa[i]; i++; } addr[i] = 0; }
+        if (pa) url_decode(pa + 5, addr, sizeof addr);   /* l'IHM encode : ':' -> %3A, '/' -> %2F */
         live_start(src, addr);
         serve_live(fd);
     }

@@ -2,6 +2,13 @@
 
 Toutes les modifications notables du projet seront documentées dans ce fichier.
 
+## [Non publié]
+
+### Corrigé
+- 🐛 **Capture live depuis l'interface** : l'adresse était transmise encodée (`:` → `%3A`,
+  `/` → `%2F`) et n'était pas décodée par le serveur. Seules les sources UDP (port seul)
+  fonctionnaient ; une adresse TCP `hôte:port`, un chemin VDR ou un port série échouaient.
+
 ## [2.1.2] - 2026-09-20
 
 ### Ajouté
